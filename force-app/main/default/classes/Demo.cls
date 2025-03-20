@@ -18,7 +18,7 @@ global class Demo {  // Violates AvoidGlobalModifier
             if (value > 10) {
                 if (value > 20) {
                     if (value > 30) {
-                        System.debug('Heeeeeeeeeeelllllll');
+                        System.debug('Heeeeeeeeeeellllllloooooo');
                     }
                 }
 
