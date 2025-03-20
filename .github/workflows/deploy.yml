@@ -19,10 +19,15 @@ jobs:
         sf --version
 
     - name: Authenticate Source Org
-      run: echo "${{ secrets.SF_SOURCE_ORG_AUTH_URL }}" > authfile_source.txt && sf org login sfdx-url --sfdx-url-file authfile_source.txt --set-default --alias sourceOrg
+      run: |
+        echo "${{ secrets.SF_SOURCE_ORG_AUTH_URL }}" > authfile_source.txt
+        sf org login sfdx-url --sfdx-url-file authfile_source.txt --set-default --alias sourceOrg
+  
 
     - name: Authenticate Target Org
-      run: echo "${{ secrets.SF_TARGET_ORG_AUTH_URL }}" > authfile_target.txt && sf org login sfdx-url --sfdx-url-file authfile_target.txt --set-default --alias targetOrg
+      run: |
+        echo "${{ secrets.SF_TARGET_ORG_AUTH_URL }}" > authfile_target.txt
+        sf org login sfdx-url --sfdx-url-file authfile_target.txt --set-default --alias targetOrg
 
     - name: Retrieve Metadata from Source Org
       run: |
