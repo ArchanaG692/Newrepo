@@ -41,7 +41,7 @@ jobs:
               shell: bash
               run: |
                   echo ${{ secrets.SFDX_QA_URL}} > ./SFDX_PRODUCTION_URL.txt
-                  echo "$SFDX_PRODUCTION_URL.txt"
+                  echo "SFDX_PRODUCTION_URL: $SFDX_PRODUCTION_URL.txt"
 
             - name: 'Create delta packages for new, modified or deleted metadata'
               run: | 
