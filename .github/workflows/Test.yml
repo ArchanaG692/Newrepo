@@ -6,7 +6,7 @@ jobs:
     steps:
       - name: my-step
         run: echo "Hello World!"
-        
+
       - name: Authenticate Source Org
         run: |
           response=$(curl -X POST "https://login.salesforce.com/services/oauth2/token" \
@@ -25,5 +25,23 @@ jobs:
   
           echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
           echo "Successfully authenticated with Salesforce."
+
+      - name: Authenticate Target Org
+        run: |
+            response=$(curl -X POST "https://login.salesforce.com/services/oauth2/token" \
+              -d "grant_type=password" \
+              -d "client_id=${{ secrets.SF_CLIENT_ID_TARGET }}" \
+              -d "client_secret=${{ secrets.SF_CLIENT_SECRET_TARGET }}" \
+              -d "username=${{ secrets.SF_USERNAME_TARGET }}" \
+              -d "password=${{ secrets.SF_PASSWORD_TARGET }}" )
     
+            SF_ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token')
+    
+            if [ -z "$SF_ACCESS_TOKEN" ]; then
+              echo "Salesforce authentication failed."
+              exit 1
+            fi
+    
+            echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
+            echo "Successfully authenticated with Salesforce."
   
