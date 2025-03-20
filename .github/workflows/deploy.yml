@@ -25,7 +25,7 @@ jobs:
           -d "client_id=${{ secrets.SF_CLIENT_ID_SOURCE }}" \
           -d "client_secret=${{ secrets.SF_CLIENT_SECRET_SOURCE }}" \
           -d "username=${{ secrets.SF_USERNAME_SOURCE }}" \
-          -d "password=${{ secrets.SF_PASSWORD }}${{ secrets.SF_SECURITY_TOKEN_SOURCE }}" )
+          -d "password=${{ secrets.SF_PASSWORD }}" )
 
         SF_ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token')
 
