@@ -19,10 +19,43 @@ jobs:
         sf --version
 
     - name: Authenticate Source Org
-      run: echo ${{ secrets.SF_SOURCE_ORG_AUTH_URL }} | sf org login sfdx-url --set-default --alias sourceOrg
+      run: |
+          response=$(curl -X POST "https://login.salesforce.com/services/oauth2/token" \
+            -d "grant_type=password" \
+            -d "client_id=${{ secrets.SF_CLIENT_ID_SOURCE }}" \
+            -d "client_secret=${{ secrets.SF_CLIENT_SECRET_SOURCE }}" \
+            -d "username=${{ secrets.SF_USERNAME_SOURCE }}" \
+            -d "password=${{ secrets.SF_PASSWORD }}" )
+  
+          SF_ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token')
+  
+          if [ -z "$SF_ACCESS_TOKEN" ]; then
+            echo "Salesforce authentication failed."
+            exit 1
+          fi
+  
+          echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
+          echo "Successfully authenticated with Salesforce."
 
     - name: Authenticate Target Org
-      run: echo ${{ secrets.SF_TARGET_ORG_AUTH_URL }} | sf org login sfdx-url --set-default --alias targetOrg
+      run: |
+            response=$(curl -X POST "https://login.salesforce.com/services/oauth2/token" \
+              -d "grant_type=password" \
+              -d "client_id=${{ secrets.SF_CLIENT_ID_TARGET }}" \
+              -d "client_secret=${{ secrets.SF_CLIENT_SECRET_TARGET }}" \
+              -d "username=${{ secrets.SF_USERNAME_TARGET }}" \
+              -d "password=${{ secrets.SF_PASSWORD_TARGET }}" )
+    
+            SF_ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token')
+    
+            if [ -z "$SF_ACCESS_TOKEN" ]; then
+              echo "Salesforce authentication failed."
+              exit 1
+            fi
+    
+            echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
+            echo "Successfully authenticated with Salesforce."
+  
 
     - name: Retrieve Metadata from Source Org
       run: |
