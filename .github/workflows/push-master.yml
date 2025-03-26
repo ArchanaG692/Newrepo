@@ -2,12 +2,7 @@
 name: Deploy master branch to production org
 
 # Definition when the workflow should run
-on:
-    push:
-      branches: 
-        - "**"
-      paths:
-        - 'force-app/**'
+on: push
             
 
 # Jobs to be executed
