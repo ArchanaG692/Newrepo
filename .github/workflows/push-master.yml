@@ -48,8 +48,16 @@ jobs:
             - name: 'Authenticate to Production Org'
               run: sfdx auth:sfdxurl:store -f ./SFDX_PRODUCTION_URL.txt -s -a production
 
-            - name: 'Deploy the entire branch to Production org'
-              run: sfdx force:source:deploy -p force-app --testlevel NoTestRun
+            - name: 'Create delta packages for new, modified or deleted metadata'
+              run: | 
+                mkdir changed-sources
+                sfdx sgd:source:delta --to "HEAD" --from "HEAD^" --output changed-sources/ --generate-delta --source force-app/
 
-            - name: 'Deploy destructive changes (if any) to Production org'
-              run: sfdx force:mdapi:deploy -d "changed-sources/destructiveChanges" --checkonly --ignorewarnings 
+            - name: 'Deploy delta package to Production org'
+              run: sfdx force:source:deploy -p changed-sources/force-app --testlevel NoTestRun
+
+            # - name: 'Deploy the entire branch to Production org'
+            #   run: sfdx force:source:deploy -p force-app --testlevel NoTestRun
+
+            # - name: 'Deploy destructive changes (if any) to Production org'
+            #   run: sfdx force:mdapi:deploy -d "changed-sources/destructiveChanges" --checkonly --ignorewarnings 
