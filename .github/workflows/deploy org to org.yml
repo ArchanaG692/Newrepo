@@ -4,10 +4,10 @@ name: Deploy master branch to production org
 on:
   push:
     branches:
-      - master  # adjust if needed
+      - Devloper  # adjust if needed
 
 jobs:
-  deploy-branch-to-production-org:
+  deploy-org-to-org:
     runs-on: ubuntu-latest
     if: ${{ github.actor != 'dependabot[bot]' }}
 
