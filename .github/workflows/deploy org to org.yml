@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: |
           echo ${{ secrets.SFDX_URL_QA }} > ./SFDX_QA_URL.txt
-          sfdx auth:sfdxurl:store -f ./SFDX_QA_URL.txt -a qa
+          sfdx auth:sfdxurl:store -f ./SFDX_QA_URL.txt -a QA
 
       # Generate delta from Dev to QA
       - name: 'Create delta packages for new, modified or deleted metadata'
