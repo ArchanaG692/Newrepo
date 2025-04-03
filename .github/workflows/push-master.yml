@@ -55,7 +55,7 @@ jobs:
                 sfdx sgd:source:delta --to "HEAD" --from "HEAD^" --output changed-sources/ --generate-delta --source force-app/
 
             - name: 'Deploy delta package to Production org'
-              run: sfdx force:source:deploy -p changed-sources/force-app --testlevel NoTestRun -o production
+              run: sfdx force:source:deploy -p changed-sources/force-app --testlevel NoTestRun
 
             # - name: 'Deploy the entire branch to Production org'
             #   run: sfdx force:source:deploy -p force-app --testlevel NoTestRun
