@@ -157,7 +157,7 @@ jobs:
 
           for file in $files; do
             echo "Running SFDX Scanner on file: $file"
-            sf scanner:run --target "$file" --format "csv" --outfile "scanner-report-partial.csv" || echo "Scanner run failed for $file"
+            sf scanner:run --target "$file" --format "csv" --outfile "scanner-report-partial.csv" --pmdconfig "force-app/main/default/Custom_apex_ruleset.xml" || echo "Scanner run failed for $file"
 
             # Ensure partial report exists before processing
             if [ -f "scanner-report-partial.csv" ] && [ -s "scanner-report-partial.csv" ]; then
