@@ -1,83 +1,108 @@
 @isTest
-public with sharing class FileTest {
-    
-    @testSetup
-    static void setupTestData() {
-        ContentVersion contentVer = new ContentVersion(
-            Title = 'Code Scanner Report',
-            PathOnClient = 'scanner_report.csv',
-            VersionData = Blob.valueOf('Problem,Severity,File,Line,Column,Rule,Description,URL,Category,Engine,Commit\n' + 
-                                       'SQL Injection,High,Account.cls,12,5,SOQL Injection,Avoid Dynamic SOQL,www.example.com,Security,PMD,abc123'),
-            FirstPublishLocationId = UserInfo.getUserId()
+private class FileTest {
+
+    @isTest
+    static void testProcessNewFiles_and_importVulnerabilityData() {
+        // Step 1: Create a valid CSV content string
+        String csvData =
+            'problem,severity,file,templine,column,rule,description,url,category,engine,commit,actualline,targetbranch\n' +
+            'Unused var,3,classes/MyClass.cls,10,5,PMDRule,Unused variable found,http://rule.url,Best Practices,PMD,abc123,10,main';
+
+        // Step 2: Upload as ContentVersion
+        ContentVersion version = new ContentVersion(
+            Title = 'SecurityReport',
+            PathOnClient = 'SecurityReport.csv',
+            VersionData = Blob.valueOf(csvData),
+            IsMajorVersion = true
         );
-        insert contentVer;
-    }
+        insert version;
 
-    @isTest
-    static void testProcessNewFiles() {
-        List<ContentVersion> newFiles = [SELECT Id, Title, ContentDocumentId FROM ContentVersion WHERE Title LIKE 'Code Scanner%'];
-        
-        System.assertNotEquals(0, newFiles.size(), 'ContentVersion records should exist');
+        // Step 3: Get ContentDocumentId after insert
+        version = [
+            SELECT Id, ContentDocumentId
+            FROM ContentVersion
+            WHERE Id = :version.Id
+        ];
 
+        // Step 4: Add ContentVersion to list
+        List<ContentVersion> versionList = new List<ContentVersion>{ version };
+
+        // Step 5: Call method
         Test.startTest();
-        File.processNewFiles(newFiles);
+        File.processNewFiles(versionList);
         Test.stopTest();
 
-        Integer vulnCount = [SELECT COUNT() FROM Vulnerability__c];
-        System.assertEquals(1, vulnCount, 'One unique Vulnerability record should have been created');
+        // Step 6: Assert Vulnerability__c record created
+        List<Vulnerability__c> records = [SELECT Id, Problem__c, Severity__c FROM Vulnerability__c];
+        System.assertEquals(1, records.size());
+        System.assertEquals('Unused var', records[0].Problem__c);
+        System.assertEquals('3', records[0].Severity__c);
     }
 
     @isTest
-    static void testImportVulnerabilityData() {
-        ContentVersion fileVersion = [SELECT Id, ContentDocumentId FROM ContentVersion WHERE Title = 'Code Scanner Report' LIMIT 1];
-
-        System.assertNotEquals(null, fileVersion.ContentDocumentId, 'ContentDocumentId should not be null');
-
-        Test.startTest();
-        File.importVulnerabilityData(fileVersion.ContentDocumentId);
-        Test.stopTest();
-
-        Integer vulnCount = [SELECT COUNT() FROM Vulnerability__c];
-        System.assertEquals(1, vulnCount, 'One unique Vulnerability record should have been created');
-    }
-
-    @isTest
-    static void testImportVulnerabilityDataWithEmptyFile() {
-        ContentVersion emptyFile = new ContentVersion(
-            Title = 'Code Scanner Empty Report',
-            PathOnClient = 'empty_report.csv',
-            VersionData = Blob.valueOf(' '), // Ensuring VersionData is not null
-            FirstPublishLocationId = UserInfo.getUserId()
+    static void test_importVulnerabilityData_emptyVersionData() {
+        ContentVersion emptyVersion = new ContentVersion(
+            Title = 'EmptyFile',
+            PathOnClient = 'EmptyFile.csv',
+            VersionData = null,
+            IsMajorVersion = true
         );
-        insert emptyFile;
+        insert emptyVersion;
 
-        ContentVersion insertedFile = [SELECT Id, ContentDocumentId FROM ContentVersion WHERE Id = :emptyFile.Id LIMIT 1];
+        emptyVersion = [
+            SELECT Id, ContentDocumentId
+            FROM ContentVersion
+            WHERE Id = :emptyVersion.Id
+        ];
 
         Test.startTest();
-        File.importVulnerabilityData(insertedFile.ContentDocumentId);
+        File.importVulnerabilityData(new List<Id>{ emptyVersion.ContentDocumentId });
         Test.stopTest();
 
-        Integer vulnCount = [SELECT COUNT() FROM Vulnerability__c];
-        System.assertEquals(0, vulnCount, 'No Vulnerability records should be created for empty file');
+        // No records should be created
+        List<Vulnerability__c> records = [SELECT Id FROM Vulnerability__c];
+        System.assertEquals(0, records.size());
     }
 
     @isTest
-    static void testImportVulnerabilityDataWithMissingHeaders() {
-        ContentVersion invalidFile = new ContentVersion(
-            Title = 'Code Scanner Invalid Report',
-            PathOnClient = 'invalid_report.csv',
-            VersionData = Blob.valueOf('Problem,Severity,File\nSQL Injection,High,Account.cls'), // Ensuring VersionData is present
-            FirstPublishLocationId = UserInfo.getUserId()
-        );
-        insert invalidFile;
+    static void test_importVulnerabilityData_missingRequiredFields() {
+        // Missing 'problem' column
+        String csvData =
+            'severity,file,templine,column,rule,description,url,category,engine,commit,actualline,targetbranch\n' +
+            '3,classes/MyClass.cls,10,5,PMDRule,Unused variable found,http://rule.url,Best Practices,PMD,abc123,10,main';
 
-        ContentVersion insertedFile = [SELECT Id, ContentDocumentId FROM ContentVersion WHERE Id = :invalidFile.Id LIMIT 1];
+        ContentVersion badVersion = new ContentVersion(
+            Title = 'BadFile',
+            PathOnClient = 'BadFile.csv',
+            VersionData = Blob.valueOf(csvData),
+            IsMajorVersion = true
+        );
+        insert badVersion;
+
+        badVersion = [
+            SELECT Id, ContentDocumentId
+            FROM ContentVersion
+            WHERE Id = :badVersion.Id
+        ];
 
         Test.startTest();
-        File.importVulnerabilityData(insertedFile.ContentDocumentId);
+        File.importVulnerabilityData(new List<Id>{ badVersion.ContentDocumentId });
         Test.stopTest();
 
-        Integer vulnCount = [SELECT COUNT() FROM Vulnerability__c];
-        System.assertEquals(0, vulnCount, 'No Vulnerability records should be created due to missing headers');
+        // Should skip processing due to missing 'problem' column
+        List<Vulnerability__c> records = [SELECT Id FROM Vulnerability__c];
+        System.assertEquals(0, records.size());
+    }
+
+    @isTest
+    static void test_parseCSVLine_quotes_and_commas() {
+        // A CSV line with quoted value containing a comma
+        String line = '"High Severity","This is, a comma inside","TestFile.cls"';
+
+        List<String> result = File.parseCSVLine(line);
+        System.assertEquals(3, result.size());
+        System.assertEquals('High Severity', result[0]);
+        System.assertEquals('This is, a comma inside', result[1]);
+        System.assertEquals('TestFile.cls', result[2]);
     }
 }
