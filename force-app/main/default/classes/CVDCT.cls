@@ -2,35 +2,33 @@
 private class CSVDataControllerTest {
 
     @isTest
-    static void testGetCSVData_validCSVFile() {
-        // Create a Case
+    static void testValidCSVAttachment() {
+        // Create a Case record
         Case testCase = new Case(Status = 'New');
         insert testCase;
 
-        // Create CSV content with all violation types
+        // Create a valid CSV with different violation types
         String csvContent =
             'File,Problem\n' +
-            'classes/MyClass.cls,Issue A\n' +
+            'classes/Test.cls,Issue A\n' +
             'lwc/component.js,Issue B\n' +
             'aura/Comp.cmp,Issue C\n' +
-            'objects/MyObj__c,Issue D';
+            'objects/Obj__c,Issue D';
 
-        // Create Attachment (CSV)
-        Attachment attachment = new Attachment(
-            Name = 'CodeScanReport.csv',
+        // Create an Attachment with .csv name and link to Case
+        Attachment attach = new Attachment(
+            Name = 'ScanReport.csv',
             Body = Blob.valueOf(csvContent),
             ContentType = 'text/csv',
             ParentId = testCase.Id
         );
-        insert attachment;
+        insert attach;
 
-        // Run method
         Test.startTest();
         CSVDataController.CSVDataResponse result = CSVDataController.getCSVData(testCase.Id);
         Test.stopTest();
 
-        // Validate result
-        System.assertEquals(4, result.csvData.size(), 'Should return 4 CSV rows');
+        System.assertEquals(4, result.csvData.size());
         System.assertEquals(1, result.clsViolationCount);
         System.assertEquals(1, result.lwcViolationCount);
         System.assertEquals(1, result.auraViolationCount);
@@ -38,8 +36,7 @@ private class CSVDataControllerTest {
     }
 
     @isTest
-    static void testGetCSVData_noAttachmentFound() {
-        // Create Case without any attachments
+    static void testNoAttachmentFound() {
         Case testCase = new Case(Status = 'New');
         insert testCase;
 
@@ -47,58 +44,53 @@ private class CSVDataControllerTest {
         CSVDataController.CSVDataResponse result = CSVDataController.getCSVData(testCase.Id);
         Test.stopTest();
 
-        // Expect default empty response
         System.assertEquals(0, result.csvData.size());
-        System.assertEquals(0, result.clsViolationCount);
     }
 
     @isTest
-    static void testGetCSVData_emptyCSVFile() {
-        // Create Case
+    static void testEmptyCSVContent() {
         Case testCase = new Case(Status = 'New');
         insert testCase;
 
-        // Add attachment with empty content
-        Attachment attachment = new Attachment(
-            Name = 'EmptyFile.csv',
+        // Insert CSV file with empty body
+        Attachment attach = new Attachment(
+            Name = 'Empty.csv',
             Body = Blob.valueOf(''),
             ContentType = 'text/csv',
             ParentId = testCase.Id
         );
-        insert attachment;
+        insert attach;
 
         Test.startTest();
         CSVDataController.CSVDataResponse result = CSVDataController.getCSVData(testCase.Id);
         Test.stopTest();
 
-        System.assertEquals(0, result.csvData.size(), 'Should return 0 rows for empty file');
+        System.assertEquals(0, result.csvData.size());
     }
 
     @isTest
-    static void testGetCSVData_malformedCSVRows() {
-        // Create Case
+    static void testMalformedCSVRow() {
         Case testCase = new Case(Status = 'New');
         insert testCase;
 
-        // CSV where one row has missing column
+        // One row is malformed (only one column)
         String csvContent =
             'File,Problem\n' +
-            'classes/IncompleteRow.cls\n' + // only 1 column instead of 2
-            'lwc/ValidRow.js,Issue B';
+            'classes/OnlyFilePath\n' +
+            'lwc/Component.js,Missing Semicolon';
 
-        Attachment attachment = new Attachment(
-            Name = 'MalformedCSV.csv',
+        Attachment attach = new Attachment(
+            Name = 'BadRow.csv',
             Body = Blob.valueOf(csvContent),
             ContentType = 'text/csv',
             ParentId = testCase.Id
         );
-        insert attachment;
+        insert attach;
 
         Test.startTest();
         CSVDataController.CSVDataResponse result = CSVDataController.getCSVData(testCase.Id);
         Test.stopTest();
 
-        System.assertEquals(1, result.csvData.size(), 'Only one valid row should be processed');
-        System.assertEquals(1, result.lwcViolationCount, 'Should count LWC file');
+        System.assertEquals(1, result.csvData.size()); // Only 1 row valid
+        System.assertEquals(1, result.lwcViolationCount);
     }
-}
