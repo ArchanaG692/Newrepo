@@ -1,43 +1,87 @@
 @isTest
 private class ScannerReportHandlerTest {
-    @testSetup
-    static void setupTestData() {
-        // Create a test ContentVersion with CSV data
-        String csvData = 'Problem,Severity,File,Line,Rule,Description\n' +
-                         'Unused Variable,High,TestClass.cls,10,AvoidUnusedVariables,Variable is declared but never used\n' +
-                         'Hardcoded Id,Medium,TestClass.cls,20,AvoidHardcodingIds,Hardcoded Salesforce ID detected';
-        
-        ContentVersion testVersion = new ContentVersion(
-            Title = 'Test Scanner Report.csv',
-            VersionData = Blob.valueOf(csvData),
-            PathOnClient = 'Test Scanner Report.csv',
+
+    @isTest
+    static void testProcessFiles_withValidCSV() {
+        // Step 1: Create mock CSV content with a TargetBranch column
+        String csvContent =
+            'Problem,Severity,TargetBranch\n' +
+            'Violation 1,High,main';
+
+        // Step 2: Insert ContentVersion with "Code Scanner" in the title
+        ContentVersion version = new ContentVersion(
+            Title = 'Code Scanner Report',
+            PathOnClient = 'CodeScannerReport.csv',
+            VersionData = Blob.valueOf(csvContent),
             IsMajorVersion = true
         );
-        insert testVersion;
+        insert version;
+
+        // Step 3: Retrieve ContentDocumentId after insert
+        version = [
+            SELECT Id, ContentDocumentId
+            FROM ContentVersion
+            WHERE Id = :version.Id
+            LIMIT 1
+        ];
+
+        // Step 4: Wrap in future context using Test.startTest/stopTest
+        Test.startTest();
+        ScannerReportHandler.processFiles(new Set<Id>{ version.ContentDocumentId });
+        Test.stopTest();
+
+        // Step 5: Validate Case created with proper values
+        List<Case> createdCases = [
+            SELECT Id, File_Name__c, Target_Environment__c
+            FROM Case
+            WHERE File_Name__c = 'Code Scanner Report'
+        ];
+
+        System.assertEquals(1, createdCases.size(), 'Expected 1 Case record');
+        System.assertEquals('main', createdCases[0].Target_Environment__c, 'Target_Environment__c should be mapped');
+
+        // Step 6: Validate ContentDocumentLink created
+        List<ContentDocumentLink> links = [
+            SELECT Id, LinkedEntityId, ContentDocumentId
+            FROM ContentDocumentLink
+            WHERE LinkedEntityId = :createdCases[0].Id
+            AND ContentDocumentId = :version.ContentDocumentId
+        ];
+
+        System.assertEquals(1, links.size(), 'File should be linked to Case via ContentDocumentLink');
     }
 
     @isTest
-    static void testProcessFiles() {
+    static void testProcessFiles_withEmptySet() {
         Test.startTest();
-
-        // Fetch the inserted ContentVersion and get the associated ContentDocumentId
-        ContentVersion insertedVersion = [SELECT Id, ContentDocumentId FROM ContentVersion LIMIT 1];
-
-        // Call the method with the test ContentDocument ID
-        Set<Id> documentIds = new Set<Id>{insertedVersion.ContentDocumentId};
-        ScannerReportHandler.processFiles(documentIds);
-
+        ScannerReportHandler.processFiles(new Set<Id>());
         Test.stopTest();
 
-        // Validate that Cases are created
-        List<Case> createdCases = [SELECT Subject, Description, Priority, Status, Origin, Scanner_Report_File_ID__c FROM Case];
+        // No records should be created
+        System.assertEquals(0, [SELECT COUNT() FROM Case], 'No Case should be created for empty input');
+    }
 
-        System.assertEquals(2, createdCases.size(), 'Two cases should be created');
+    @isTest
+    static void testProcessFiles_withInvalidTitle() {
+        // CSV Title does NOT contain "Code Scanner" or "Code Scanner Delta"
+        ContentVersion version = new ContentVersion(
+            Title = 'SomeOtherReport',
+            PathOnClient = 'OtherReport.csv',
+            VersionData = Blob.valueOf('Header1,Header2\nVal1,Val2'),
+            IsMajorVersion = true
+        );
+        insert version;
 
-        // Verify case details
-        System.assertEquals('Scanner Report Violation: Unused Variable', createdCases[0].Subject);
-        System.assertEquals('High', createdCases[0].Priority);
-        System.assertEquals('New', createdCases[0].Status);
-        System.assertEquals(insertedVersion.ContentDocumentId, createdCases[0].Scanner_Report_File_ID__c);
+        version = [
+            SELECT Id, ContentDocumentId
+            FROM ContentVersion
+            WHERE Id = :version.Id
+        ];
+
+        Test.startTest();
+        ScannerReportHandler.processFiles(new Set<Id>{ version.ContentDocumentId });
+        Test.stopTest();
+
+        System.assertEquals(0, [SELECT COUNT() FROM Case], 'No case should be created for irrelevant file title');
     }
 }
