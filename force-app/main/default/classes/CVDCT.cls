@@ -94,3 +94,4 @@ private class CSVDataControllerTest {
         System.assertEquals(1, result.csvData.size()); // Only 1 row valid
         System.assertEquals(1, result.lwcViolationCount);
     }
+}
