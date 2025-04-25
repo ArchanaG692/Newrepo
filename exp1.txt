@@ -1,39 +1,13 @@
-- name: Extract Commit Author from AutoRABIT-style Message
-  id: autorabit-author
+- name: Get Commit Author
+  id: commit-author
   run: |
-    COMMIT_MSG=$(git log -1 --pretty=format:'%s')
-    echo "Commit Message: $COMMIT_MSG"
+    AUTHOR_NAME=$(git log -1 --pretty=format:'%an')
+    AUTHOR_EMAIL=$(git log -1 --pretty=format:'%ae')
+    COMMITTER_NAME=$(git log -1 --pretty=format:'%cn')
+    COMMITTER_EMAIL=$(git log -1 --pretty=format:'%ce')
 
-    AUTHOR="unknown"
+    echo "Author: $AUTHOR_NAME <$AUTHOR_EMAIL>"
+    echo "Committer: $COMMITTER_NAME <$COMMITTER_EMAIL>"
 
-    if echo "$COMMIT_MSG" | grep -qE '^PDMS|^PRMS'; then
-      # Example: PDMS_RTC2422157_Neetu_PRMSDevmnr15_1
-      AUTHOR=$(echo "$COMMIT_MSG" | awk -F'_' '{print $3}')
-
-    elif echo "$COMMIT_MSG" | grep -q '^GPS'; then
-      # Handles both formats in lines 2 & 3
-      AUTHOR=$(echo "$COMMIT_MSG" | awk -F'[-_]' '{print $(NF-2)}')
-
-    elif echo "$COMMIT_MSG" | grep -q '^CEC'; then
-      # Example: CEC.2025.PI1.S6.US114279.ThandasS_May24_CECDevmnr6_3
-      AUTHOR=$(echo "$COMMIT_MSG" | sed -E 's/.*\.([^.]+)_[^_]+.*/\1/')
-
-    elif echo "$COMMIT_MSG" | grep -q '^CTX'; then
-      # Example: CTX_2025_May_US2051586_V2_CMTRDevmnr14_1
-      AUTHOR=$(echo "$COMMIT_MSG" | awk -F'_' '{print $(NF-2)}')
-
-    elif echo "$COMMIT_MSG" | grep -q '^PBM'; then
-      # Handles both PBM lines
-      AUTHOR=$(echo "$COMMIT_MSG" | awk -F'[-_]' '{print $(NF-3)}')
-
-    elif echo "$COMMIT_MSG" | grep -q '^Bell'; then
-      # Bell_PI1_SP4_marrelease_sampathk_v7_...
-      AUTHOR=$(echo "$COMMIT_MSG" | awk -F'_' '{print $4}')
-
-    elif echo "$COMMIT_MSG" | grep -q '^MC-'; then
-      # MC-AccessibilityDefects-chegus-devmnr17
-      AUTHOR=$(echo "$COMMIT_MSG" | awk -F'-' '{print $3}')
-    fi
-
-    echo "Detected Author: $AUTHOR"
-    echo "commit-author=$AUTHOR" >> $GITHUB_OUTPUT
+    echo "commit-author=$AUTHOR_NAME" >> $GITHUB_OUTPUT
+    echo "GITHUB_USERNAME=$AUTHOR_NAME" >> $GITHUB_ENV
