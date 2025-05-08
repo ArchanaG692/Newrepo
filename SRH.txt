@@ -1,6 +1,6 @@
 public with sharing class ScannerReportHandler {
-    private static Boolean isProcessing = false; // Prevent recursive execution
-    private static final String RECORD_TYPE_DEVELOPER_NAME = 'Your_RecordType_DevName'; // 🔁 Change this
+    private static Boolean isProcessing = false;
+    private static final String RECORD_TYPE_DEVELOPER_NAME = 'Your_RecordType_DevName'; // 🔁 Replace with your actual record type DeveloperName
 
     @future
     public static void processFiles(Set<Id> contentDocumentIds) {
@@ -10,7 +10,6 @@ public with sharing class ScannerReportHandler {
         }
 
         isProcessing = true;
-
         System.debug('🔍 Processing Scanner Report Files for ContentDocumentIds: ' + contentDocumentIds);
 
         if (contentDocumentIds.isEmpty()) {
@@ -19,7 +18,7 @@ public with sharing class ScannerReportHandler {
             return;
         }
 
-        // 🔍 Fetch RecordTypeId once
+        // 🔍 Fetch RecordTypeId dynamically
         Id caseRecordTypeId;
         try {
             caseRecordTypeId = [
@@ -57,9 +56,13 @@ public with sharing class ScannerReportHandler {
                 System.debug('✅ File Matches Condition: ' + cv.Title);
 
                 Case newCase = new Case();
-                newCase.RecordTypeId = caseRecordTypeId; // ✅ Assigning Record Type
+                newCase.RecordTypeId = caseRecordTypeId;
                 newCase.File_Name__c = cv.Title;
                 newCase.Status = 'New';
+                newCase.Origin = 'Email';         // ✅ Set Origin
+                newCase.Priority = 'Medium';      // ✅ Set Priority
+
+                String commitAuthor = '';         // ✅ For Subject
 
                 try {
                     ContentVersion cvWithData = [
@@ -90,6 +93,7 @@ public with sharing class ScannerReportHandler {
                             if (commitIndex != -1 && values.size() > commitIndex) {
                                 String commitValue = values[commitIndex].trim();
                                 newCase.Case_Created_By__c = commitValue;
+                                commitAuthor = commitValue;
                             }
 
                             if (newCase.Target_Environment__c != null || newCase.Case_Created_By__c != null) {
@@ -101,6 +105,8 @@ public with sharing class ScannerReportHandler {
                     System.debug('❌ Error reading CSV content: ' + e.getMessage());
                 }
 
+                newCase.Subject = commitAuthor + ' - ' + cv.Title;  // ✅ Dynamic Subject
+
                 casesToInsert.add(newCase);
                 caseToFileMap.put(cv.ContentDocumentId, null);
             }
@@ -109,7 +115,7 @@ public with sharing class ScannerReportHandler {
         if (!casesToInsert.isEmpty()) {
             try {
                 insert casesToInsert;
-                System.debug('✅ Inserted ' + casesToInsert.size() + ' Case records.');
+                System.debug('✅ Successfully inserted ' + casesToInsert.size() + ' Case records.');
 
                 Integer index = 0;
                 for (Case createdCase : casesToInsert) {
@@ -156,9 +162,9 @@ public with sharing class ScannerReportHandler {
         if (!linksToInsert.isEmpty()) {
             try {
                 insert linksToInsert;
-                System.debug('✅ Linked ' + linksToInsert.size() + ' files to Case records.');
+                System.debug('✅ Successfully linked ' + linksToInsert.size() + ' files to Case records.');
             } catch (DmlException e) {
-                System.debug('❌ Error linking files: ' + e.getMessage());
+                System.debug('❌ Error linking files to Case: ' + e.getMessage());
             }
         }
 
