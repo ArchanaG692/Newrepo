@@ -1,13 +1,83 @@
-- name: Get Commit Author
-  id: commit-author
-  run: |
-    AUTHOR_NAME=$(git log -1 --pretty=format:'%an')
-    AUTHOR_EMAIL=$(git log -1 --pretty=format:'%ae')
-    COMMITTER_NAME=$(git log -1 --pretty=format:'%cn')
-    COMMITTER_EMAIL=$(git log -1 --pretty=format:'%ce')
+name: Weekly SFDX Full Code Scan
 
-    echo "Author: $AUTHOR_NAME <$AUTHOR_EMAIL>"
-    echo "Committer: $COMMITTER_NAME <$COMMITTER_EMAIL>"
+on:
+  workflow_dispatch:        
 
-    echo "commit-author=$AUTHOR_NAME" >> $GITHUB_OUTPUT
-    echo "GITHUB_USERNAME=$AUTHOR_NAME" >> $GITHUB_ENV
+jobs:
+  weekly-full-scan:
+    runs-on:  
+      group: cvs-linux-self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Install SFDX Scanner Plugin
+        run: sf plugins install @salesforce/sfdx-scanner
+
+      # - name: Get Repository and Branch Info
+      #   id: get-info
+      #   run: |
+      #     REPO_NAME=$(echo $GITHUB_REPOSITORY | cut -d'/' -f2)
+      #     BRANCH_NAME=$(echo $GITHUB_REF | sed 's/refs\/heads\///')
+      #     COMMIT_LABEL=$(git log -1 --pretty=format:'%s')
+      #     FILE_TITLE="Code Scanner Weekly Report_${REPO_NAME}_${BRANCH_NAME}_${COMMIT_LABEL}"
+      #     echo "FILE_TITLE=${FILE_TITLE}" >> $GITHUB_ENV
+      #     echo "TARGET_BRANCH=${BRANCH_NAME}" >> $GITHUB_ENV  # Store the Target Branch
+      #     echo "Target Branch = ${BRANCH_NAME}"
+
+      - name: Run Full SFDX Scan
+        run: |
+          mkdir -p scanner_output
+          sf scanner:run \
+            --target "force-app/main/default/classes,force-app/main/default/lwc" \
+            --format "csv" \
+            --outfile "scanner_output/weekly-scanner-report.csv" \
+            --pmdconfig "force-app/main/default/Custom_apex_ruleset.xml" || echo "Scan completed with warnings"
+
+      - name: Generate Unique File Name for Scanner Report
+        run: |
+          TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
+          REPORT_FILE="weekly-scan-report-${TIMESTAMP}.csv"
+          echo "REPORT_FILE=$REPORT_FILE" >> $GITHUB_ENV
+          echo "✅ Generated unique file name: $REPORT_FILE"
+
+      - name: Backup Scanner Report
+        run: |
+          mkdir -p /tmp/artifact_backup
+          cp scanner_output/weekly-scanner-report.csv /tmp/artifact_backup/${{ env.REPORT_FILE }}
+          echo "✅ Scanner report backed up in /tmp/artifact_backup/${{ env.REPORT_FILE }}."
+
+      - name: Commit and Push Scanner Report to `Scanner_Reports` Branch
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          BRANCH_NAME="Scanner_Reports"
+          echo "✅ Target Branch: $BRANCH_NAME"
+
+          git fetch origin
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
+            git checkout $BRANCH_NAME
+          else
+            git checkout -b $BRANCH_NAME
+            git push --set-upstream origin $BRANCH_NAME
+          fi
+
+          git pull origin $BRANCH_NAME --rebase
+          mkdir -p Artifact
+          cp /tmp/artifact_backup/${{ env.REPORT_FILE }} Artifact/${{ env.REPORT_FILE }}
+
+          git add Artifact/${{ env.REPORT_FILE }}
+          git commit -m "📅 Weekly full scan report uploaded: ${{ env.REPORT_FILE }}" || echo "No changes to commit"
+          git push origin $BRANCH_NAME
