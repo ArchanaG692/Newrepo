@@ -1,14 +1,25 @@
-name: hello-world
-on: push
-jobs:
-  my-job:
-    runs-on: ubuntu-latest
-    steps:
-      - name: my-step
-        run: echo "Hello World!"
+name: Deploy Metadata to Target Org
 
-      - name: Authenticate Source Org
-        run: |
+on:
+  push:
+    branches:
+      - main  # Triggers on push to main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Install Salesforce CLI
+      run: |
+        npm install -g @salesforce/cli
+        sf --version
+
+    - name: Authenticate Source Org
+      run: |
           response=$(curl -X POST "https://login.salesforce.com/services/oauth2/token" \
             -d "grant_type=password" \
             -d "client_id=${{ secrets.SF_CLIENT_ID_SOURCE }}" \
@@ -26,8 +37,8 @@ jobs:
           echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
           echo "Successfully authenticated with Salesforce."
 
-      - name: Authenticate Target Org
-        run: |
+    - name: Authenticate Target Org
+      run: |
             response=$(curl -X POST "https://login.salesforce.com/services/oauth2/token" \
               -d "grant_type=password" \
               -d "client_id=${{ secrets.SF_CLIENT_ID_TARGET }}" \
@@ -45,3 +56,12 @@ jobs:
             echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
             echo "Successfully authenticated with Salesforce."
   
+
+    - name: Retrieve Metadata from Source Org
+      run: |
+        mkdir mdapi_source
+        sf project retrieve start --metadata ApexClass,ApexTrigger --target-org sourceOrg --output-dir mdapi_source
+
+    - name: Deploy Metadata to Target Org
+      run: |
+        sf project deploy start --metadata-dir mdapi_source --target-org targetOrg --wait 10 --test-level NoTestRun
