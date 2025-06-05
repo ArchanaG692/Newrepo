@@ -1,0 +1,137 @@
+name: Devops Code Scan Workflow
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+jobs:
+  devopsscan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      - name: Install Salesforce CLI
+        run: npm install @salesforce/cli --global
+
+      - name: Install Code Analyzer Plugin
+        run: sf plugins install @salesforce/code-analyzer
+
+      - name: Verify Salesforce CLI and Code Analyzer Plugin
+        run: |
+          sf --version
+          sf plugins --core | grep code-analyzer || echo 'Code Analyzer plugin not found!'
+
+      - name: Extract Changed Lines
+        run: |
+          mkdir -p temp_scanner_files
+          > changed_cls_lwc_files.txt
+          > line_number_mapping.txt
+          > scanner-report.csv
+
+          changed_files=$(git diff --name-only HEAD~1 HEAD -- '*.cls' '*.js' || true)
+          echo "Detected changed files: $changed_files"
+
+          for file in $changed_files; do
+            echo "Processing file: $file"
+            extracted_lines=$(git diff --unified=0 HEAD~1 HEAD -- "$file" | awk '/^\+[^+]/ {print substr($0, 2)}')
+            if [ -z "$extracted_lines" ]; then
+              echo "No valid lines found for $file. Skipping..."
+              continue
+            fi
+
+            echo "$extracted_lines" > "line_number_mapping_${file//\//_}.txt"
+            temp_file="temp_scanner_files/temp_${file//\//_}"
+            touch "$temp_file"
+
+            if [[ "$file" == *.cls ]]; then
+              echo "public class TempWrapperClass {" > "$temp_file"
+              echo "    public static void tempMethod() {" >> "$temp_file"
+
+              # Normalize indentation
+              min_indent=$(grep -v '^\s*$' "line_number_mapping_${file//\//_}.txt" | sed 's/^ *//' | awk '{ print length($0) - length($0) }' | sort -n | head -n1)
+
+              while IFS= read -r line_content; do
+                clean_line=$(echo "$line_content" | sed 's/^[ \t]*//;s/[ \t]*$//')
+                if [ -n "$clean_line" ]; then
+                  normalized_line=$(echo "$line_content" | sed "s/^ \{0,$min_indent\}//")
+                  echo "        $normalized_line" >> "$temp_file"
+                  echo "$temp_file,$normalized_line" >> line_number_mapping.txt
+                fi
+              done < "line_number_mapping_${file//\//_}.txt"
+
+              echo "    }" >> "$temp_file"
+              echo "}" >> "$temp_file"
+
+            elif [[ "$file" == *.js ]]; then
+              echo "// JS Temp Component" > "$temp_file"
+              cat "line_number_mapping_${file//\//_}.txt" >> "$temp_file"
+              echo "$temp_file" >> line_number_mapping.txt
+            fi
+
+            echo "$temp_file" >> changed_cls_lwc_files.txt
+          done
+
+      - name: Run SFDX Scanner
+        run: |
+          echo "Problem,Severity,File,TempLine,Column,Rule,Description,URL,Category,Engine,Commit,ActualLine,TargetBranch" > scanner-report.csv
+          while IFS= read -r file; do
+            echo "Running scanner on $file"
+            sf scanner run --target "$file" --format csv --outfile scanner-part.csv --engine pmd --pmdconfig "Custom_apex_ruleset.xml" || echo "Scanner failed on $file"
+            tail -n +2 scanner-part.csv >> scanner-report.csv
+          done < changed_cls_lwc_files.txt
+
+      - name: Authenticate with Salesforce
+        run: |
+          response=$(curl -X POST "https://test.salesforce.com/services/oauth2/token" \
+            -d "grant_type=password" \
+            -d "client_id=${{ secrets.SF_CLIENT_ID }}" \
+            -d "client_secret=${{ secrets.SF_CLIENT_SECRET }}" \
+            -d "username=${{ secrets.SF_USERNAME }}" \
+            -d "password=${{ secrets.SF_PASSWORD }}")
+          SF_ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token')
+          echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
+
+      - name: Upload Scanner Report to Salesforce
+        run: |
+          if [ ! -f scanner-report.csv ]; then
+            echo "scanner-report.csv not found"
+            exit 1
+          fi
+
+          response=$(curl -X POST "https://test.salesforce.com/services/data/v61.0/sobjects/ContentVersion" \
+            -H "Authorization: Bearer $SF_ACCESS_TOKEN" \
+            -H "Content-Type: multipart/form-data" \
+            -F "entity_content={\"Title\": \"Scanner Report\", \"PathOnClient\": \"scanner-report.csv\"};type=application/json" \
+            -F "VersionData=@scanner-report.csv;type=text/csv")
+          echo "Salesforce response: $response"
+
+      - name: Push Scanner Report to Branch
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch
+          git checkout Scanner_Reports || git checkout -b Scanner_Reports
+          mkdir -p Artifact
+          cp scanner-report.csv Artifact/scanner-report.csv
+
+          git add Artifact/scanner-report.csv
+          git commit -m "Auto-update scanner report"
+          git push origin Scanner_Reports

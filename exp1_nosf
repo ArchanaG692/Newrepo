@@ -1,0 +1,147 @@
+name: DevOps Code Scan
+
+on:
+  push:
+    branches:
+      - "**"
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  quality-gate-code-check:
+    runs-on: 
+      group: cvs-linux-self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      - name: Install Salesforce CLI
+        run: npm install @salesforce/cli --global
+
+      - name: Install Salesforce Code Analyzer plugin
+        run: |
+          sf plugins remove @salesforce/sfdx-scanner || true
+          sf plugins install @salesforce/code-analyzer
+
+      - name: Prepare scanned file list
+        run: |
+          mkdir -p temp_scanner_files
+          > changed_cls_lwc_files.txt
+          git diff --name-only HEAD~1 HEAD -- '*.cls' '*.js' > changed_cls_lwc_files.txt || true
+
+      - name: Run SFDX Code Analyzer on Changed Lines
+        run: |
+          files=$(cat changed_cls_lwc_files.txt)
+          if [ -z "$files" ]; then
+            echo "No files to scan. Creating an empty report."
+            echo "Problem,Severity,File,TempLine,Column,Rule,Description,URL,Category,Engine,Commit,ActualLine,TargetBranch" > scanner-report.csv
+            exit 0
+          fi
+
+          echo "Problem,Severity,File,TempLine,Column,Rule,Description,URL,Category,Engine,Commit,ActualLine,TargetBranch" > scanner-report.csv
+          UNWANTED_PATH="/home/runner/_work/ESOSCSFDXTest/ESOSCSFDXTest/temp_scanner_files"
+
+          for file in $files; do
+            echo "Running SFDX Code Analyzer on file: $file"
+
+            if [[ "$file" == *.cls ]]; then
+              ruleset_path=$(find . -name "Custom_apex_ruleset.xml" | head -n 1)
+              if [ -z "$ruleset_path" ] || [ ! -f "$ruleset_path" ]; then
+                echo "❌ Custom Apex ruleset file not found or not committed. Skipping scan."
+                continue
+              fi
+              sf code-analyzer:run --target "$file" --format "csv" --outfile "scanner-report-partial.csv" --pmdconfig "$ruleset_path" || echo "Analyzer run failed for $file"
+
+            elif [[ "$file" == *.js ]]; then
+              mkdir -p force-app/main/default/lwc/tmpLwcComponent
+              newPath="force-app/main/default/lwc/tmpLwcComponent/tmpLwcComponent.js"
+              cp "$file" "$newPath"
+
+              sf code-analyzer:run --target "$newPath" --format "csv" --outfile "scanner-report-partial.csv" || echo "Analyzer run failed for $file"
+              rm -f "$newPath"
+
+            else
+              echo "Unsupported file type: $file"
+              continue
+            fi
+
+            if [ -f "scanner-report-partial.csv" ] && [ -s "scanner-report-partial.csv" ]; then
+              tail -n +2 "scanner-report-partial.csv" >> scanner-report.csv
+            fi
+          done
+
+          echo "Final Scanner Report with TargetBranch:"
+          cat scanner-report.csv
+          if [ "$(realpath scanner-report.csv)" != "$GITHUB_WORKSPACE/scanner-report.csv" ]; then
+            cp scanner-report.csv "$GITHUB_WORKSPACE/scanner-report.csv"
+          else
+            echo "scanner-report.csv is already in $GITHUB_WORKSPACE, no need to copy."
+          fi
+
+      - name: Generate Unique File Name for Scanner Report
+        run: |
+          COMMIT_LABEL=$(git log -1 --pretty=format:'%s' | tr ' ' '_')
+          REPORT_FILE="${COMMIT_LABEL}.csv"
+          echo "REPORT_FILE=$REPORT_FILE" >> $GITHUB_ENV
+          echo "✅ Generated unique file name: $REPORT_FILE"
+
+      - name: Backup Scanner Report
+        run: |
+          mkdir -p /tmp/artifact_backup
+          cp scanner-report.csv /tmp/artifact_backup/${{ env.REPORT_FILE }}
+          echo "✅ Scanner report backed up in /tmp/artifact_backup/${{ env.REPORT_FILE }}."
+
+      - name: Discard uncommitted changes (force clean)
+        run: |
+          git reset --hard
+          git clean -fd
+          git checkout Scanner_Reports
+
+      - name: Commit and Push Scanner Report to Scanner_Reports Branch
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          BRANCH_NAME="Scanner_Reports"
+          echo "✅ Target Branch: $BRANCH_NAME"
+
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
+            echo "✅ Remote branch $BRANCH_NAME exists."
+            git checkout $BRANCH_NAME
+          else
+            echo "❌ Remote branch $BRANCH_NAME does not exist! Creating it now..."
+            git checkout -b $BRANCH_NAME
+            git push --set-upstream origin $BRANCH_NAME
+          fi
+
+          git pull origin $BRANCH_NAME --rebase
+          mkdir -p Artifact
+          cp /tmp/artifact_backup/${{ env.REPORT_FILE }} Artifact/${{ env.REPORT_FILE }}
+          echo "✅ Scanner report restored to Artifact/${{ env.REPORT_FILE }}."
+
+          git add Artifact/${{ env.REPORT_FILE }}
+          git commit -m "🔄 Auto-update scanner report (${REPORT_FILE}) in Artifact folder for branch $BRANCH_NAME" || echo "No changes to commit"
+          git push origin $BRANCH_NAME
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+
+      - name: Restore scanner-report.csv for Blocking Step
+        run: |
+          echo "Restoring scanner-report.csv to $GITHUB_WORKSPACE for blocking step"
+          cp /tmp/artifact_backup/${{ env.REPORT_FILE }} "$GITHUB_WORKSPACE/scanner-report.csv"

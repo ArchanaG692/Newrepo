@@ -1,0 +1,56 @@
+- name: Get Changed Lines and Prepare Temporary Files
+  run: |
+    mkdir -p temp_scanner_files
+    > changed_cls_lwc_files.txt
+    > line_number_mapping.txt
+    > scanner-report-temp.csv
+
+    changed_files=$(git diff --name-only HEAD~1 HEAD -- '*.cls' || true)
+
+    if [ -z "$changed_files" ]; then
+      echo "No changed .cls files detected."
+      echo "Problem,Severity,File,TempLine,Column,Rule,Description,URL,Category,Engine,Commit,ActualLine,TargetBranch" > scanner-report.csv
+      exit 0
+    fi
+
+    for file in $changed_files; do
+      echo "Processing file: $file"
+      extracted_lines=$(git diff --unified=0 HEAD~1 HEAD -- "$file" | awk '
+        /^@@/ { next }
+        /^\+/ {
+          if ($0 !~ /^(diff --git|index|---|\+\+\+|@@|b\/force-app)/) {
+            print substr($0, 2);
+          }
+        }')
+
+      [ -z "$extracted_lines" ] && continue
+
+      echo "$extracted_lines" > "line_number_mapping_${file//\//_}.txt"
+      temp_file="temp_scanner_files/temp_${file//\//_}"
+      touch "$temp_file"
+
+      echo "public class TempWrapperClass {" > "$temp_file"
+      echo "    public static void tempMethod() {" >> "$temp_file"
+      while IFS= read -r line_content; do
+        if [ -n "$line_content" ]; then
+          echo "        $line_content" >> "$temp_file"
+          echo "$temp_file,$line_content" >> line_number_mapping.txt
+        fi
+      done < "line_number_mapping_${file//\//_}.txt"
+      echo "    }" >> "$temp_file"
+      echo "}" >> "$temp_file"
+
+      echo "$temp_file" >> changed_cls_lwc_files.txt
+    done
+
+    echo "====== Final Line Number Mapping ======"
+    cat line_number_mapping.txt || echo "No line number mapping available."
+    echo "Generated temp files:"
+    ls -l temp_scanner_files || echo "No files in temp_scanner_files directory."
+
+- name: Print Changed Apex Files
+  run: |
+    echo "List of changed Apex files processed:"
+    cat changed_cls_lwc_files.txt || echo "No changed Apex files recorded."
+    echo "Contents of generated temp scanner files:"
+    ls -l temp_scanner_files || echo "No files in temp_scanner_files directory."
