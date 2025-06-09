@@ -26,29 +26,22 @@ jobs:
         run: |
           sf plugins uninstall @salesforce/sfdx-scanner || true
 
-      - name: Install Code Analyzer Plugin (latest v5)
+      - name: Install Code Analyzer Plugin (v5)
         run: |
-          sf plugins install @salesforce/plugin-code-analyzer
-      
-      - name: Verify Code Analyzer Version
+          sf plugins install @salesforce/plugin-code-analyzer@latest
+
+      - name: Verify Code Analyzer Plugin Version
         run: |
-          sf plugins --core | grep code-analyzer
-      
-      - name: Verify Installed Plugins
-        run: |
-          sf plugins --core
-          sf plugins
+          sf plugins list | grep code-analyzer
 
       - name: Disable Telemetry + Disable Auto Plugin Install
         run: |
           sf config:set disableTelemetry=true
           sf config:set plugins.autoInstall=false
-          
-      - name: Run PMD Scan on Apex Code
+
+      - name: Run Code Analyzer v5 PMD Scan (Best Practices)
         run: |
-          sf scanner run \
-            --target "force-app" \
-            --engine pmd \
-            --format table \
-            --category "Best Practices" \
-            --normalize-severity
+          sf code-analyzer run \
+            --workspace "force-app" \
+            --rule-selector pmd:BestPractices \
+            --format table
