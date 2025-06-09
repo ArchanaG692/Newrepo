@@ -32,9 +32,9 @@ jobs:
       - name: Confirm Only v5 Plugin Is Present
         run: sf plugins | grep code-analyzer
 
-      - name: Run Salesforce Code Analyzer v5 - PMD Rules
+      - name: Run Salesforce Code Analyzer v5 - PMD Best Practices
         run: |
           sf code-analyzer run \
             --workspace "force-app" \
-            --rule-selector pmd:BestPractices \
-            --output-format table
+            --rule-selector pmd:BestPractices
+
