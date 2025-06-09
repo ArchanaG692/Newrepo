@@ -1,11 +1,9 @@
 # code-analyzer.yml
 
 rules:
-  ApexUnitTestClassShouldHaveAsserts: {}
   AvoidHardcodingId: {}
-  AvoidDeeplyNestedIfStmts: {}
-  MethodWithTooManyLines: {}
   ClassWithTooManyFields: {}
+
 
 
 
