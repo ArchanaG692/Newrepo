@@ -19,30 +19,20 @@ jobs:
           node-version: 20
 
       - name: Install Salesforce CLI
-        run: |
-          npm install --global @salesforce/cli
+        run: npm install --global @salesforce/cli
 
-      - name: Remove Legacy Scanner Plugin (v4)
-        run: |
-          sf plugins uninstall @salesforce/sfdx-scanner || true
+      - name: Disable Auto Plugin Install (important!)
+        run: sf config:set plugins.autoInstall=false
 
-      - name: Install Code Analyzer Plugin (v5)
-        run: |
-          sf plugins install @salesforce/plugin-code-analyzer@latest
+      - name: Install Code Analyzer Plugin (v5 only)
+        run: sf plugins install @salesforce/plugin-code-analyzer@latest
 
-      - name: Verify Code Analyzer Plugin Version
-        run: |
-          sf plugins | grep code-analyzer
+      - name: Verify Plugin Installed
+        run: sf plugins | grep code-analyzer
 
-      - name: Disable Telemetry + Disable Auto Plugin Install
-        run: |
-          sf config:set disableTelemetry=true
-          sf config:set plugins.autoInstall=false
-
-      - name: Run Code Analyzer v5 PMD Scan (Best Practices)
+      - name: Run Code Analyzer v5 PMD Scan
         run: |
           sf code-analyzer run \
-          --workspace "force-app" \
-          --rule-selector pmd:BestPractices \
-          --format table
-
+            --workspace "force-app" \
+            --rule-selector pmd:BestPractices \
+            --format table
