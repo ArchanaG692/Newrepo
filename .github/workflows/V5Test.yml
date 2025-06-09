@@ -2,9 +2,8 @@ name: Salesforce Code Analyzer Scan
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches:
+      - "**"   
 
 jobs:
   static-analysis:
