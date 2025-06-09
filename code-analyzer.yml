@@ -2,10 +2,13 @@
 
 rules:
   AvoidHardcodingId:
-    tags: [MyScan]
+    tags:
+      - MyScan
 
   ClassWithTooManyFields:
-    tags: [MyScan]
+    tags:
+      - MyScan
+
 
 
 
