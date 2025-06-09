@@ -1,4 +1,4 @@
-name: Salesforce Code Analyzer Scan
+name: Salesforce Code Analyzer v5 Scan
 
 on:
   push:
@@ -21,18 +21,18 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
 
-      - name: Disable Auto Plugin Install (important!)
-        run: sf config:set plugins.autoInstall=false
+      - name: Disable Auto Plugin Install (non-interactive)
+        run: sf config:set plugins.autoInstall=false --no-prompt
 
-      - name: Install Code Analyzer Plugin (v5 only)
+      - name: Install Code Analyzer Plugin v5
         run: sf plugins install @salesforce/plugin-code-analyzer@latest
 
-      - name: Verify Plugin Installed
+      - name: Confirm Only v5 Plugin Is Present
         run: sf plugins | grep code-analyzer
 
-      - name: Run Code Analyzer v5 PMD Scan
+      - name: Run Salesforce Code Analyzer v5 - PMD Rules
         run: |
           sf code-analyzer run \
             --workspace "force-app" \
             --rule-selector pmd:BestPractices \
-            --format table
+            --output-format table
