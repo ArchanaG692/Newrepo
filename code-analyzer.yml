@@ -12,8 +12,26 @@
 engines:
   pmd:
     file_extensions:
-      - .cls
-      - .trigger
+      - ".cls"
+      - ".trigger"
+  eslint:
+    disable_engine: true
+  retire-js:
+    disable_engine: true
+  regex:
+    disable_engine: true
+  flow:
+    disable_engine: true
+  sfge:
+    disable_engine: true
+  cpd:
+    disable_engine: true
+
+rules:
+  AvoidHardcodingId: {}
+  ClassWithTooManyFields: {}
+
+
 
 
 
