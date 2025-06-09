@@ -1,8 +1,16 @@
 # code-analyzer.yml
 
 rules:
-  AvoidHardcodingId: {}
-  ClassWithTooManyFields: {}
+  AvoidHardcodingId:
+    tags: [MyScan]
+
+  ClassWithTooManyFields:
+    tags: [MyScan]
+
+  AvoidDebugStatements:
+    tags: [MyScan]
+
+
 
 
 
