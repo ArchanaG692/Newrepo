@@ -2,23 +2,21 @@
 
 rules:
   ApexUnitTestClassShouldHaveAsserts:
-    engine:
-      name: pmd
+    severity: 2
+    tags: [Test, BestPractices]
 
   AvoidHardcodingId:
-    engine:
-      name: pmd
+    severity: 2
+    tags: [Security, Maintainability, BestPractices]
 
   AvoidDeeplyNestedIfStmts:
-    engine:
-      name: pmd
+    severity: 3
+    tags: [Readability, BestPractices]
 
   MethodWithTooManyLines:
-    engine:
-      name: pmd
+    severity: 3
+    tags: [Complexity, Maintainability, BestPractices]
 
   ClassWithTooManyFields:
-    engine:
-      name: pmd
-
-
+    severity: 3
+    tags: [Complexity, BestPractices]
