@@ -37,5 +37,6 @@ jobs:
           sf code-analyzer run \
           --workspace force-app \
           --config-file code-analyzer.yml \
-          --rule-selector AvoidHardcodingId,ClassWithTooManyFields
+          --rule-selector AvoidHardcodingId \
+          --rule-selector ClassWithTooManyFields
 

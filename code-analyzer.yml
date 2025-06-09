@@ -1,13 +1,20 @@
 # code-analyzer.yml
 
-rules:
-  AvoidHardcodingId:
-    tags:
-      - MyScan
+# rules:
+#   AvoidHardcodingId:
+#     tags:
+#       - MyScan
 
-  ClassWithTooManyFields:
-    tags:
-      - MyScan
+#   ClassWithTooManyFields:
+#     tags:
+#       - MyScan
+
+engines:
+  pmd:
+    file_extensions:
+      - .cls
+      - .trigger
+
 
 
 
