@@ -35,6 +35,7 @@ jobs:
       - name: Run Salesforce Code Analyzer v5 - PMD Best Practices
         run: |
           sf code-analyzer run \
-            --workspace "force-app" \
-            --config-file code-analyzer.yml
+          --workspace "force-app" \
+          --config-file code-analyzer.yml \
+          --rule-selector tag:MyScan
 
