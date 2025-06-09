@@ -1,11 +1,13 @@
 # code-analyzer.yml
 
-engines:
-  pmd:
-    enabled: true
-    rules:
-      - name: ApexUnitTestClassShouldHaveAsserts
-      - name: AvoidDeeplyNestedIfStmts
-      - name: AvoidHardcodingId
-      - name: ClassWithTooManyFields
-      - name: MethodWithTooManyLines
+rules:
+  - engine: pmd
+    name: ApexUnitTestClassShouldHaveAsserts
+  - engine: pmd
+    name: AvoidHardcodingId
+  - engine: pmd
+    name: AvoidDeeplyNestedIfStmts
+  - engine: pmd
+    name: MethodWithTooManyLines
+  - engine: pmd
+    name: ClassWithTooManyFields
