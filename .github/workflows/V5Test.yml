@@ -34,9 +34,6 @@ jobs:
         run: |
           sf plugins --core | grep code-analyzer
 
-      - name: Debug Installed Plugins
-        run: sf plugins --verbose
-
       - name: Run PMD Scan on Apex Code
         run: |
           sf scanner run \
