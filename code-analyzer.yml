@@ -2,17 +2,23 @@
 
 rules:
   ApexUnitTestClassShouldHaveAsserts:
-    engine: pmd
+    engine:
+      name: pmd
 
   AvoidHardcodingId:
-    engine: pmd
+    engine:
+      name: pmd
 
   AvoidDeeplyNestedIfStmts:
-    engine: pmd
+    engine:
+      name: pmd
 
   MethodWithTooManyLines:
-    engine: pmd
+    engine:
+      name: pmd
 
   ClassWithTooManyFields:
-    engine: pmd
+    engine:
+      name: pmd
+
 
