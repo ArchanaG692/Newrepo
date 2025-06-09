@@ -22,7 +22,9 @@ jobs:
         run: npm install --global @salesforce/cli
 
       - name: Disable Auto Plugin Install
-        run: echo '{"plugins":{"autoInstall":false}}' > ~/.sf/sf-config.json
+        run: |
+          mkdir -p ~/.sf
+          echo '{"plugins":{"autoInstall":false}}' > ~/.sf/sf-config.json
 
       - name: Install Code Analyzer Plugin v5
         run: sf plugins install @salesforce/plugin-code-analyzer@latest
