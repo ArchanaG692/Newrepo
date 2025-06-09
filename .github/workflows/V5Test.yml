@@ -33,7 +33,17 @@ jobs:
       - name: Verify Code Analyzer Version
         run: |
           sf plugins --core | grep code-analyzer
+      
+      - name: Verify Installed Plugins
+        run: |
+          sf plugins --core
+          sf plugins
 
+      - name: Disable Telemetry + Disable Auto Plugin Install
+        run: |
+          sf config:set disableTelemetry=true
+          sf config:set plugins.autoInstall=false
+          
       - name: Run PMD Scan on Apex Code
         run: |
           sf scanner run \
