@@ -20,7 +20,7 @@ jobs:
           node-version: 20
 
       - name: Install Salesforce Code Analyzer
-        run: npm install -g @salesforce/code-analyzer
+        run: npm install -g @salesforce/code-analyzer@5.0.0
 
       - name: Run PMD Analysis on Apex Code
         run: >
