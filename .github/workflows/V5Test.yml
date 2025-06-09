@@ -3,7 +3,7 @@ name: Salesforce Code Analyzer Scan
 on:
   push:
     branches:
-      - "**"   
+      - "**"
 
 jobs:
   static-analysis:
@@ -18,14 +18,19 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Salesforce Code Analyzer
-        run: npm install -g @salesforce/code-analyzer@5.0.0
+      - name: Install Salesforce CLI
+        run: |
+          npm install --global @salesforce/cli
 
-      - name: Run PMD Analysis on Apex Code
-        run: >
-          sfdx scanner:run
-          --target "force-app"
-          --category "Best Practices"
-          --format "table"
-          --engine "pmd"
-          --normalize-severity
+      - name: Install Code Analyzer Plugin v5.1.0
+        run: |
+          sf plugins install @salesforce/code-analyzer@5.1.0
+
+      - name: Run PMD Scan on Apex Code
+        run: |
+          sf scanner run \
+            --target "force-app" \
+            --engine pmd \
+            --format table \
+            --category "Best Practices" \
+            --normalize-severity
