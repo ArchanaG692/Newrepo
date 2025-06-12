@@ -1,4 +1,101 @@
-#!/bin/sh
-. "$(dirname "$0")/_/husky.sh"
+#!/bin/bash
+ 
+# Get the list of changed Apex (.cls) or LWC files
+changed_files=$(git diff --cached --name-only | grep -E '\.cls$|\.lwc$')
+ 
+# Check if there are any relevant changes
+if [ -z "$changed_files" ]; then
+  echo "No relevant changes to scan."
+  exit 0  # Gracefully exit if no relevant files are changed
+fi
+ 
+# Create a directory for temporary files
+# Create a reliable scan directory inside the repo
+temp_dir="./tmp-scan"
+mkdir -p "$temp_dir"
+rm -f "$temp_dir"/*
 
-npm run precommit
+ 
+# Extract uncommitted lines and generate temp files
+for file in $changed_files; do
+  echo "Processing file: $file"
+ 
+  # Extract the actual uncommitted lines for the specific file
+  changed_lines=$(git diff --cached --unified=0 "$file" | grep '^+' | grep -v '+++' | cut -d'+' -f2-)
+ 
+  if [ -n "$changed_lines" ]; then
+    echo "Changed lines in $file:"
+    echo "$changed_lines"
+   
+    # Create a temporary file with a valid method/class structure and ApexDoc
+    temp_file="$temp_dir/temp_${file//\//_}"
+    echo "/* Temporary file for changed lines scan */" > "$temp_file"
+   
+    # Add ApexDoc for the TempWrapperClass
+    echo "/**" >> "$temp_file"
+    echo " * @description A temporary wrapper class created for scanning changed lines." >> "$temp_file"
+    echo " * @author Auto-generated" >> "$temp_file"
+    echo " */" >> "$temp_file"
+    echo "public class TempWrapperClass {" >> "$temp_file"
+   
+    # Add ApexDoc for the tempMethod
+    echo "    /**" >> "$temp_file"
+    echo "     * @description This method holds the changed lines extracted from the original file." >> "$temp_file"
+    echo "     */" >> "$temp_file"
+    echo "    public static void tempMethod() {" >> "$temp_file"
+    echo "        /* Begin of extracted changed lines */" >> "$temp_file"
+    echo "$changed_lines" >> "$temp_file"
+    echo "        /* End of extracted changed lines */" >> "$temp_file"
+    echo "    }" >> "$temp_file"
+   
+    # Check for unbalanced braces (ensure the method and class are closed properly)
+    open_braces=$(echo "$changed_lines" | grep -o '{' | wc -l)
+    close_braces=$(echo "$changed_lines" | grep -o '}' | wc -l)
+    if [ "$open_braces" -gt "$close_braces" ]; then
+      remaining_closing_braces=$(($open_braces - $close_braces))
+      for i in $(seq 1 $remaining_closing_braces); do
+        echo "}" >> "$temp_file"
+      done
+    fi
+   
+    echo "}" >> "$temp_file"  # Close the class
+    echo "Created temporary file with method structure: $temp_file"
+  else
+    echo "No relevant changes detected in $file."
+  fi
+done
+ 
+# Check if any temp files were created
+if [ -z "$(ls -A $temp_dir)" ]; then
+  echo "No temporary files created. Exiting."
+  rm -rf "$temp_dir"
+  exit 0
+fi
+ 
+# Run the SFDX scanner on the temp files
+echo "Running SFDX scanner on temporary files."
+#sf scanner:run --target "$temp_dir" --format "json" --outfile "scanner-report.json" --pmdconfig "force-app/main/default/Custom_apex_ruleset.xml"
+sf code-analyzer run --workspace "$temp_dir" --output-file "scanner-report.json" --rule-selector AvoidDebugStaements --config-file code-analyzer.yml
+# Ensure that the scanner report was generated
+if [ ! -f "scanner-report.json" ]; then
+  echo "Scanner report not found. Please check the scanner command."
+  rm -rf "$temp_dir"
+  exit 1
+fi
+ 
+# Parse the scanner report and check for severity 3 issues
+severity_fail_count=$(grep -oP '"severity":\s*(1)' scanner-report.json | wc -l)
+ 
+# Output the fail count for debugging
+echo "Severity Fail Count: $severity_fail_count"
+ 
+# Block commit if there are severity 3 issues
+if [ "$severity_fail_count" -gt 0 ]; then
+  echo "Blocking your commit due to vulnerabilities found with severity 3."
+  rm -rf "$temp_dir"
+  exit 1
+else
+  echo "No vulnerabilities found. Proceeding with commit."
+  rm -rf "$temp_dir"
+  exit 0
+fi

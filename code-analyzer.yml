@@ -26,8 +26,8 @@ engines:
     disable_engine: true
 
 rules:
-  AvoidHardcodingId: {}
-  ClassWithTooManyFields: {}
+  AvoidDebugStaements: {}
+
 
 
 
