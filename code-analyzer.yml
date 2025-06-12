@@ -11,9 +11,7 @@
 
 engines:
   pmd:
-    file_extensions:
-      - ".cls"
-      - ".trigger"
+    file_extensions: {"apex": [".cls",".trigger"]}
   eslint:
     disable_engine: true
   retire-js:
