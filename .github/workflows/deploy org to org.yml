@@ -1,0 +1,59 @@
+# Unique name for this workflow
+name: Deploy master branch to production org
+
+on:
+  push:
+    branches:
+      - Devloper  # adjust if needed
+
+jobs:
+  deploy-org-to-org:
+    runs-on: ubuntu-latest
+    if: ${{ github.actor != 'dependabot[bot]' }}
+
+    steps:
+      # Install Salesforce CLI
+      - name: 'Install Salesforce CLI'
+        run: |
+          wget https://developer.salesforce.com/media/salesforce-cli/sfdx/channels/stable/sfdx-linux-x64.tar.xz
+          mkdir ~/sfdx
+          tar xJf sfdx-linux-x64.tar.xz -C ~/sfdx --strip-components 1
+          echo "$HOME/sfdx/bin" >> $GITHUB_PATH
+          ~/sfdx/bin/sfdx version
+
+      # Install SFDX Git Delta plugin
+      - name: 'Install sfdx git delta'
+        run: |
+          echo y | sfdx plugins:install sfdx-git-delta
+          sfdx plugins
+
+      # Checkout source code
+      - name: 'Checkout source code'
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      # Auth: Dev Org (Target)
+      - name: 'Auth to Dev Org'
+        shell: bash
+        run: |
+          echo ${{ secrets.SFDX_URL_DEV }} > ./SFDX_Dev_URL.txt
+          sfdx auth:sfdxurl:store -f ./SFDX_Dev_URL.txt -a dev
+
+      # Auth: QA Org (Source)
+      - name: 'Auth to QA Org'
+        shell: bash
+        run: |
+          echo ${{ secrets.SFDX_URL_QA }} > ./SFDX_QA_URL.txt
+          sfdx auth:sfdxurl:store -f ./SFDX_QA_URL.txt -a QA
+
+      # Generate delta from QA to dev
+      - name: 'Create delta packages for new, modified or deleted metadata'
+        run: |
+          mkdir changed-sources
+          sfdx sgd:source:delta --to "HEAD" --from "HEAD^" --output changed-sources/ --generate-delta --source force-app/
+
+      # Deploy delta to Dev
+      - name: 'Deploy delta to QA Org'
+        run: |
+          sfdx force:source:deploy -p changed-sources/force-app -u dev --testlevel NoTestRun --wait 10 --json

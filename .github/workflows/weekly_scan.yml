@@ -1,0 +1,79 @@
+name: Weekly SFDX Full Code Scan
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # Every 5 minutes
+  workflow_dispatch:        # Optional: allows manual triggering
+
+jobs:
+  weekly-full-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Install SFDX Scanner Plugin
+        run: sf plugins install @salesforce/sfdx-scanner
+
+      - name: Run Full SFDX Scan
+        run: |
+          mkdir -p scanner_output
+          sf scanner:run \
+            --target "force-app/main/default/classes,force-app/main/default/lwc" \
+            --format "csv" \
+            --outfile "scanner_output/weekly-scanner-report.csv" \
+            --pmdconfig "force-app/main/default/Custom_apex_ruleset.xml" || echo "Scan completed with warnings"
+
+      - name: Upload Weekly Report to GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-scanner-report
+          path: scanner_output/weekly-scanner-report.csv
+
+      - name: Generate Unique File Name for Scanner Report
+        run: |
+          TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
+          REPORT_FILE="weekly-scan-report-${TIMESTAMP}.csv"
+          echo "REPORT_FILE=$REPORT_FILE" >> $GITHUB_ENV
+          echo "✅ Generated unique file name: $REPORT_FILE"
+
+      - name: Backup Scanner Report
+        run: |
+          mkdir -p /tmp/artifact_backup
+          cp scanner_output/weekly-scanner-report.csv /tmp/artifact_backup/${{ env.REPORT_FILE }}
+          echo "✅ Scanner report backed up in /tmp/artifact_backup/${{ env.REPORT_FILE }}."
+
+      - name: Commit and Push Scanner Report to `Scanner_Reports` Branch
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          BRANCH_NAME="Scanner_Reports"
+          echo "✅ Target Branch: $BRANCH_NAME"
+
+          git fetch origin
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
+            git checkout $BRANCH_NAME
+          else
+            git checkout -b $BRANCH_NAME
+            git push --set-upstream origin $BRANCH_NAME
+          fi
+
+          git pull origin $BRANCH_NAME --rebase
+          mkdir -p Artifact
+          cp /tmp/artifact_backup/${{ env.REPORT_FILE }} Artifact/${{ env.REPORT_FILE }}
+
+          git add Artifact/${{ env.REPORT_FILE }}
+          git commit -m "📅 Weekly full scan report uploaded: ${{ env.REPORT_FILE }}" || echo "No changes to commit"
+          git push origin $BRANCH_NAME
