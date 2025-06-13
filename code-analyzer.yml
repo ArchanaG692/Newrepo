@@ -9,6 +9,17 @@
 #     tags:
 #       - MyScan
 
+log_folder: logs
+
+rules:
+  pmd:
+    AvoidDebugStatements:
+      severity: High
+      tags: ["Custom", "BestPractices"]
+    AvoidHardcodingId:
+      severity: Moderate
+      tags: ["Custom", "Design"]
+
 engines:
   pmd:
     file_extensions:
@@ -25,17 +36,6 @@ engines:
     disable_engine: true
   cpd:
     disable_engine: true
-
-rules:
-  AvoidDebugStatements:
-    categories:
-      category1:
-        engine: pmd
-
-  AvoidHardcodingId:
-    categories:
-      category2:
-        engine: pmd
 
 
 
