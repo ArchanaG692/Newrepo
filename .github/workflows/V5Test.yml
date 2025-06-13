@@ -60,7 +60,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: code-analyzer-report-${{ steps.commit.outputs.label }}
-          path: scanner-report-${{ steps.commit.outputs.label }}.csv
+          path: scanner-report.csv
 
       - name: Commit and push report to `scanner-reports` branch
         run: |
@@ -70,7 +70,7 @@ jobs:
           git fetch origin
           git switch --create scanner-reports || git switch scanner-reports
 
-          cp scanner-report-${{ steps.commit.outputs.label }}.csv .
-          git add scanner-report-${{ steps.commit.outputs.label }}.csv
+          cp scanner-report.csv 
+          git add scanner-report.csv
           git commit -m "📦 Add scan report for: ${{ steps.commit.outputs.label }}" || echo "No changes to commit"
           git push origin scanner-reports
