@@ -21,8 +21,10 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Salesforce CLI
-        run: npm install --global @salesforce/cli
+      - name: Install and Upgrade Salesforce CLI
+        run: |
+          npm install --global @salesforce/cli
+          sf update --force
 
       - name: Disable Auto Plugin Auto-Install
         run: |
@@ -35,15 +37,19 @@ jobs:
           sf plugins uninstall @salesforce/plugin-code-analyzer || true
 
       - name: Install Code Analyzer Plugin v5.1.0
-        run: sf plugins install @salesforce/plugin-code-analyzer@5.1.0
+        run: |
+          sf plugins install @salesforce/plugin-code-analyzer@5.1.0
+          sf plugins update
 
-      - name: Confirm Installed Plugins
-        run: sf plugins
+      - name: Confirm CLI & Plugin Versions
+        run: |
+          sf --version
+          sf plugins
 
-      - name: Create logs folder
+      - name: Create logs folder (for log_folder path)
         run: mkdir -p logs
 
-      - name: Run Salesforce Code Analyzer 
+      - name: Run Salesforce Code Analyzer
         run: |
           sf code-analyzer run \
             --workspace "force-app/main/default/classes/Demo.cls" \
@@ -69,12 +75,11 @@ jobs:
 
       - name: Generate Unique File Name for Scanner Report
         run: |
-          COMMIT_LABEL=$(git log -1 --pretty=format:'%s' | tr ' ' '_')
+          COMMIT_LABEL=$(git log -1 --pretty=format:'%s' | tr ' ' '_' | tr -cd '[:alnum:]_-')
           REPORT_FILE="${COMMIT_LABEL}.csv"
           echo "REPORT_FILE=$REPORT_FILE" >> $GITHUB_ENV
 
       - name: Save Scanner Report Before Branch Checkout
-        if: always()
         run: |
           mkdir -p /tmp/artifact_backup
           cp scanner-report.csv /tmp/artifact_backup/${{ env.REPORT_FILE }}
@@ -86,8 +91,6 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           BRANCH_NAME="scanner-reports"
-          echo "✅ Target Branch: $BRANCH_NAME"
-
           if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
             git fetch origin $BRANCH_NAME:$BRANCH_NAME
             git switch $BRANCH_NAME
@@ -96,11 +99,10 @@ jobs:
             git push --set-upstream origin $BRANCH_NAME
           fi
 
-          git pull origin $BRANCH_NAME --rebase
           mkdir -p Artifact
           cp /tmp/artifact_backup/${{ env.REPORT_FILE }} Artifact/${{ env.REPORT_FILE }}
           git add Artifact/${{ env.REPORT_FILE }}
-          git commit -m "🔄 Auto-update scanner report (${{ env.REPORT_FILE }}) in Artifact folder for branch $BRANCH_NAME" || echo "No changes to commit"
+          git commit -m "🔄 Auto-update scanner report (${{ env.REPORT_FILE }}) in Artifact folder"
           git push origin $BRANCH_NAME
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
