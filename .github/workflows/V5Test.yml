@@ -35,4 +35,10 @@ jobs:
       - name: Run Salesforce Code Analyzer v5 - PMD Best Practices
         run: |
           sf code-analyzer run --workspace "force-app\main\default\classes\Demo.cls" --output-file "scanner-report.json" --rule-selector AvoidDebugStatements --config-file code-analyzer.yml
+          
+      - name: Upload Scanner Report CSV
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-analyzer-report
+          path: scanner-report.csv
 
