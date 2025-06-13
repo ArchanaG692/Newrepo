@@ -11,7 +11,8 @@
 
 engines:
   pmd:
-    file_extensions: {"apex": [".cls", ".trigger"]}
+    file_extensions:
+      apex: [".cls", ".trigger"]
   eslint:
     disable_engine: true
   retire-js:
@@ -28,15 +29,13 @@ engines:
 rules:
   AvoidDebugStatements:
     categories:
-      - "Best Practices"
-    engine:
-      name: pmd
+      category1:
+        engine: pmd
 
   AvoidHardcodingId:
     categories:
-      - "Design"
-    engine:
-      name: pmd
+      category2:
+        engine: pmd
 
 
 
