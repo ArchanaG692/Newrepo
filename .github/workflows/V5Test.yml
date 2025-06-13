@@ -5,6 +5,9 @@ on:
     branches:
       - "**"
 
+permissions:
+  contents: write
+
 jobs:
   static-analysis:
     runs-on: ubuntu-latest
@@ -21,24 +24,31 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
 
-      - name: Disable Auto Plugin Install
+      - name: Disable Auto Plugin Auto-Install
         run: |
           mkdir -p ~/.sf
           echo '{"plugins":{"autoInstall":false}}' > ~/.sf/sf-config.json
 
-      - name: Install Code Analyzer Plugin v5
-        run: sf plugins install @salesforce/plugin-code-analyzer@latest
+      - name: Uninstall legacy scanner if present
+        run: sf plugins uninstall @salesforce/sfdx-scanner || true
 
-      - name: Confirm Only v5 Plugin Is Present
-        run: sf plugins | grep code-analyzer
+      - name: Install Code Analyzer Plugin v5.0.0
+        run: sf plugins install @salesforce/plugin-code-analyzer@5.0.0
 
-      - name: Run Salesforce Code Analyzer v5 - PMD Best Practices
+      - name: Confirm Installed Plugin
+        run: sf plugins list
+
+      - name: Run Salesforce Code Analyzer v5 - CSV Output
         run: |
-          sf code-analyzer run --workspace "force-app\main\default\classes\Demo.cls" --output-format csv --output-file "scanner-report.csv" --rule-selector AvoidDebugStatements --config-file code-analyzer.yml
-          
+          sf code-analyzer run \
+            --workspace "force-app/main/default/classes/Demo.cls" \
+            --rule-selector AvoidDebugStatements \
+            --output-format csv \
+            --output-file scanner-report.csv \
+            --config-file code-analyzer.yml
+
       - name: Upload Scanner Report CSV
         uses: actions/upload-artifact@v4
         with:
           name: code-analyzer-report
           path: scanner-report.csv
-
