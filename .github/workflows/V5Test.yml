@@ -34,21 +34,24 @@ jobs:
           sf plugins uninstall @salesforce/sfdx-scanner || true
           sf plugins uninstall @salesforce/plugin-code-analyzer || true
 
-      - name: Install Code Analyzer Plugin v5.0.0
+      - name: Install Code Analyzer Plugin v5.1.0
         run: sf plugins install @salesforce/plugin-code-analyzer@5.1.0
 
       - name: Confirm Installed Plugins
         run: sf plugins
 
+      - name: Create logs folder
+        run: mkdir -p logs
+
       - name: Run Salesforce Code Analyzer 
         run: |
           sf code-analyzer run \
-            --workspace "force-app\main\default\classes\Demo.cls" \
+            --workspace "force-app/main/default/classes/Demo.cls" \
             --rule-selector AvoidDebugStatements \
-            --rule-selector AvoidHardcodingId\
+            --rule-selector AvoidHardcodingId \
+            --output-format csv \
             --output-file scanner-report.csv \
             --config-file code-analyzer.yml
-
 
       - name: Upload Scanner Report CSV
         uses: actions/upload-artifact@v4
@@ -57,46 +60,26 @@ jobs:
           path: scanner-report.csv
 
       - name: Ensure Scanner Report Exists
-        if: always()  # ✅ Ensures it runs even if commit is blocked
-        run: |
-            if [ ! -s scanner-report.csv ]; then
-              echo "No scanner report generated, creating a dummy report."
-              echo "Problem,Severity,File,TempLine,Column,Rule,Description,URL,Category,Engine,Commit,ActualLine" > scanner-report.csv
-            fi
-      - name: Debug - List Files Before Upload
         if: always()
         run: |
-            echo "Listing files before uploading scanner report:"
-            ls -lah
-      
+          if [ ! -s scanner-report.csv ]; then
+            echo "No scanner report generated, creating a dummy report."
+            echo "Problem,Severity,File,TempLine,Column,Rule,Description,URL,Category,Engine,Commit,ActualLine" > scanner-report.csv
+          fi
+
       - name: Generate Unique File Name for Scanner Report
         run: |
-          # TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
-          # REPORT_FILE="scanner-report-${TIMESTAMP}.csv"
           COMMIT_LABEL=$(git log -1 --pretty=format:'%s' | tr ' ' '_')
           REPORT_FILE="${COMMIT_LABEL}.csv"
           echo "REPORT_FILE=$REPORT_FILE" >> $GITHUB_ENV
-          echo "✅ Generated unique file name: $REPORT_FILE"
 
       - name: Save Scanner Report Before Branch Checkout
         if: always()
         run: |
-          if [ ! -f scanner-report.csv ]; then
-            echo "❌ scanner-report.csv file not found! Creating an empty report."
-            echo "Problem,Severity,File,TempLine,Column,Rule,Description,URL,Category,Engine,Commit,ActualLine" > scanner-report.csv
-          fi
           mkdir -p /tmp/artifact_backup
           cp scanner-report.csv /tmp/artifact_backup/${{ env.REPORT_FILE }}
-          echo "✅ Scanner report backed up in /tmp/artifact_backup/${{ env.REPORT_FILE }}."
 
-      - name: Backup Scanner Report
-        if: always()
-        run: |
-          mkdir -p /tmp/artifact_backup
-          cp scanner-report.csv /tmp/artifact_backup/${{ env.REPORT_FILE }}
-          echo "✅ Scanner report backed up in /tmp/artifact_backup/${{ env.REPORT_FILE }}."
-
-      - name: Commit and Push Scanner Report to `Scanner_Reports` Branch
+      - name: Commit and Push Scanner Report to `scanner-reports` Branch
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
@@ -105,26 +88,19 @@ jobs:
           BRANCH_NAME="scanner-reports"
           echo "✅ Target Branch: $BRANCH_NAME"
 
-          # 🔹 Check if the `scanner-reports` branch exists remotely
           if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
-            echo "✅ Remote branch $BRANCH_NAME exists."
             git fetch origin $BRANCH_NAME:$BRANCH_NAME
             git switch $BRANCH_NAME
           else
-            echo "❌ Remote branch $BRANCH_NAME does not exist! Creating it now..."
             git checkout -b $BRANCH_NAME
             git push --set-upstream origin $BRANCH_NAME
           fi
 
-
           git pull origin $BRANCH_NAME --rebase
           mkdir -p Artifact
           cp /tmp/artifact_backup/${{ env.REPORT_FILE }} Artifact/${{ env.REPORT_FILE }}
-          echo "✅ Scanner report restored to Artifact/${{ env.REPORT_FILE }}."
-
           git add Artifact/${{ env.REPORT_FILE }}
-          git commit -m "🔄 Auto-update scanner report (${REPORT_FILE}) in Artifact folder for branch $BRANCH_NAME" || echo "No changes to commit"
+          git commit -m "🔄 Auto-update scanner report (${{ env.REPORT_FILE }}) in Artifact folder for branch $BRANCH_NAME" || echo "No changes to commit"
           git push origin $BRANCH_NAME
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
-
