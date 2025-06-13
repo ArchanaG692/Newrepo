@@ -21,32 +21,21 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install and Upgrade Salesforce CLI
-        run: |
-          npm install --global @salesforce/cli
-          sf update --force
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
 
       - name: Disable Auto Plugin Auto-Install
         run: |
           mkdir -p ~/.sf
           echo '{"plugins":{"autoInstall":false}}' > ~/.sf/sf-config.json
 
-      - name: Uninstall conflicting plugins
+      - name: Force Install Code Analyzer Plugin v5.1.0
         run: |
-          sf plugins uninstall @salesforce/sfdx-scanner || true
           sf plugins uninstall @salesforce/plugin-code-analyzer || true
-
-      - name: Install Code Analyzer Plugin v5.1.0
-        run: |
           sf plugins install @salesforce/plugin-code-analyzer@5.1.0
-          sf plugins update
+          sf plugins | grep code-analyzer
 
-      - name: Confirm CLI & Plugin Versions
-        run: |
-          sf --version
-          sf plugins
-
-      - name: Create logs folder (for log_folder path)
+      - name: Create logs folder
         run: mkdir -p logs
 
       - name: Run Salesforce Code Analyzer
@@ -69,28 +58,28 @@ jobs:
         if: always()
         run: |
           if [ ! -s scanner-report.csv ]; then
-            echo "No scanner report generated, creating a dummy report."
             echo "Problem,Severity,File,TempLine,Column,Rule,Description,URL,Category,Engine,Commit,ActualLine" > scanner-report.csv
           fi
 
       - name: Generate Unique File Name for Scanner Report
         run: |
-          COMMIT_LABEL=$(git log -1 --pretty=format:'%s' | tr ' ' '_' | tr -cd '[:alnum:]_-')
+          COMMIT_LABEL=$(git log -1 --pretty=format:'%s' | tr ' ' '_')
           REPORT_FILE="${COMMIT_LABEL}.csv"
           echo "REPORT_FILE=$REPORT_FILE" >> $GITHUB_ENV
 
-      - name: Save Scanner Report Before Branch Checkout
+      - name: Save Scanner Report to Temp Backup
         run: |
           mkdir -p /tmp/artifact_backup
           cp scanner-report.csv /tmp/artifact_backup/${{ env.REPORT_FILE }}
 
-      - name: Commit and Push Scanner Report to `scanner-reports` Branch
+      - name: Commit and Push Scanner Report to scanner-reports Branch
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           BRANCH_NAME="scanner-reports"
+
           if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
             git fetch origin $BRANCH_NAME:$BRANCH_NAME
             git switch $BRANCH_NAME
@@ -102,7 +91,7 @@ jobs:
           mkdir -p Artifact
           cp /tmp/artifact_backup/${{ env.REPORT_FILE }} Artifact/${{ env.REPORT_FILE }}
           git add Artifact/${{ env.REPORT_FILE }}
-          git commit -m "🔄 Auto-update scanner report (${{ env.REPORT_FILE }}) in Artifact folder"
+          git commit -m "🔄 Auto-update scanner report (${REPORT_FILE})"
           git push origin $BRANCH_NAME
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
