@@ -35,7 +35,7 @@ jobs:
           sf plugins uninstall @salesforce/plugin-code-analyzer || true
 
       - name: Install Code Analyzer Plugin v5.0.0
-        run: sf plugins install @salesforce/plugin-code-analyzer@5.0.0
+        run: sf plugins install @salesforce/plugin-code-analyzer@5.1.0
 
       - name: Confirm Installed Plugins
         run: sf plugins
@@ -45,14 +45,20 @@ jobs:
           sf code-analyzer run \
             --workspace "force-app\main\default\classes\Demo.cls" \
             --rule-selector AvoidDebugStatements \
-            --output-file scanner-report.json \
+            --output-file scanner-report.csv \
             --config-file code-analyzer.yml
       
-      - name: Upload Raw JSON Report
+      # - name: Upload Raw JSON Report
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: code-analyzer-json
+      #     path: scanner-report.json   
+          
+      - name: Upload Raw CSV Report
         uses: actions/upload-artifact@v4
         with:
-          name: code-analyzer-json
-          path: scanner-report.json      
+          name: code-analyzer-csv
+          path: scanner-report.csv
 
       - name: Convert JSON report to CSV
         run: |
