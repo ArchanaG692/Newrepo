@@ -61,15 +61,25 @@ jobs:
 
           const report = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 
-          if (!Array.isArray(report.results)) {
-            console.warn('No violations found or unexpected JSON format.');
+          const allResults = [];
+          if (report.results && typeof report.results === 'object') {
+            for (const engine in report.results) {
+              const violations = report.results[engine];
+              if (Array.isArray(violations)) {
+                allResults.push(...violations);
+              }
+            }
+          }
+
+          if (allResults.length === 0) {
+            console.warn('No violations found.');
             fs.writeFileSync('scanner-report.csv', 'fileName,line,column,ruleName,severity,message\n');
             process.exit(0);
           }
 
           const headers = ["fileName", "line", "column", "ruleName", "severity", "message"];
-          const rows = report.results.map(r => [
-              r.fileName, r.line, r.column, r.ruleName, r.severity, `"${(r.message || '').replace(/"/g, '""')}"`
+          const rows = allResults.map(r => [
+            r.fileName, r.line, r.column, r.ruleName, r.severity, `"${(r.message || '').replace(/"/g, '""')}"`
           ]);
           const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
           fs.writeFileSync('scanner-report.csv', csv);
