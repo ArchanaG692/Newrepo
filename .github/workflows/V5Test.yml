@@ -1,4 +1,4 @@
-name: Salesforce Code Analyzer v5 Scan
+name: Salesforce Code Analyzer CSV Scan
 
 on:
   push:
@@ -21,26 +21,12 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Salesforce CLI
-        run: npm install --global @salesforce/cli
+      - name: Install Salesforce Code Analyzer as local module
+        run: npm install --save-dev @salesforce/code-analyzer@5.1.0
 
-      - name: Disable Auto Plugin Auto-Install
+      - name: Run Code Analyzer and export to CSV
         run: |
-          mkdir -p ~/.sf
-          echo '{"plugins":{"autoInstall":false}}' > ~/.sf/sf-config.json
-
-      - name: Uninstall legacy scanner if present
-        run: sf plugins uninstall @salesforce/sfdx-scanner || true
-
-      - name: Install Code Analyzer Plugin v5.0.0
-        run: sf plugins install @salesforce/plugin-code-analyzer@5.0.0
-
-      - name: Confirm Installed Plugin
-        run: sf plugins
-
-      - name: Run Salesforce Code Analyzer v5 - CSV Output
-        run: |
-          sf code-analyzer run \
+          npx sf code-analyzer run \
             --workspace "force-app/main/default/classes/Demo.cls" \
             --rule-selector AvoidDebugStatements \
             --output-format csv \
