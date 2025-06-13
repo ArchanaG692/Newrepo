@@ -26,8 +26,14 @@ engines:
     disable_engine: true
 
 rules:
-  AvoidDebugStatements: {}
-  AvoidHardcodingId: {}
+  AvoidDebugStatements:
+    engine: pmd
+    categories: [Best Practices]
+
+  AvoidHardcodingId:
+    engine: pmd
+    categories: [Design]
+
 
 
 
