@@ -37,8 +37,8 @@ jobs:
       - name: Install Code Analyzer Plugin v5.1.0
         run: sf plugins install @salesforce/plugin-code-analyzer@5.1.0
 
-      - name: Confirm Installed Plugins
-        run: sf plugins
+      - name: Confirm Installed Plugin
+        run: sf plugins | grep code-analyzer
 
       - name: Get sanitized commit message
         id: commit
@@ -47,7 +47,7 @@ jobs:
           safe_message=$(echo "$raw_message" | sed 's/[^a-zA-Z0-9_-]/_/g' | cut -c1-50)
           echo "label=$safe_message" >> $GITHUB_OUTPUT
 
-      - name: Run Salesforce Code Analyzer - Output CSV
+      - name: Run Salesforce Code Analyzer - CSV Output (5.1.0)
         run: |
           sf code-analyzer run \
             --workspace "force-app/main/default/classes/Demo.cls" \
@@ -70,7 +70,7 @@ jobs:
           git fetch origin
           git switch --create scanner-reports || git switch scanner-reports
 
-          cp scanner-report-${{ steps.commit.outputs.label }}.csv scanner-report-${{ steps.commit.outputs.label }}.csv
+          cp scanner-report-${{ steps.commit.outputs.label }}.csv .
           git add scanner-report-${{ steps.commit.outputs.label }}.csv
           git commit -m "📦 Add scan report for: ${{ steps.commit.outputs.label }}" || echo "No changes to commit"
           git push origin scanner-reports
