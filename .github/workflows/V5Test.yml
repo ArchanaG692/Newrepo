@@ -36,7 +36,7 @@ jobs:
         run: sf plugins install @salesforce/plugin-code-analyzer@5.0.0
 
       - name: Confirm Installed Plugin
-        run: sf plugins list
+        run: sf plugins
 
       - name: Run Salesforce Code Analyzer v5 - CSV Output
         run: |
