@@ -1,4 +1,4 @@
-name: Salesforce Code Analyzer CSV Scan
+name: Salesforce Code Analyzer v5 - JSON to CSV
 
 on:
   push:
@@ -21,17 +21,47 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Salesforce Code Analyzer as local module
-        run: npm install --save-dev @salesforce/code-analyzer@5.1.0
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
 
-      - name: Run Code Analyzer and export to CSV
+      - name: Disable Auto Plugin Auto-Install
         run: |
-          npx sf code-analyzer run \
-            --workspace "force-app/main/default/classes/Demo.cls" \
+          mkdir -p ~/.sf
+          echo '{"plugins":{"autoInstall":false}}' > ~/.sf/sf-config.json
+
+      - name: Uninstall any conflicting scanner plugin
+        run: |
+          sf plugins uninstall @salesforce/sfdx-scanner || true
+          sf plugins uninstall @salesforce/plugin-code-analyzer || true
+
+      - name: Install Code Analyzer Plugin v5.0.0
+        run: sf plugins install @salesforce/plugin-code-analyzer@5.0.0
+
+      - name: Confirm Installed Plugins
+        run: sf plugins
+
+      - name: Run Salesforce Code Analyzer - Output JSON
+        run: |
+          sf code-analyzer run \
+            --workspace "force-app" \
             --rule-selector AvoidDebugStatements \
-            --output-format csv \
-            --output-file scanner-report.csv \
+            --output-file scanner-report.json \
             --config-file code-analyzer.yml
+
+      - name: Convert JSON report to CSV
+        run: |
+          cat > convert.js << 'EOF'
+          const fs = require('fs');
+          const report = JSON.parse(fs.readFileSync('scanner-report.json', 'utf8'));
+          const headers = ["fileName", "line", "column", "ruleName", "severity", "message"];
+          const rows = report.results.map(r => [
+              r.fileName, r.line, r.column, r.ruleName, r.severity, `"${r.message.replace(/"/g, '""')}"`
+          ]);
+          const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+          fs.writeFileSync('scanner-report.csv', csv);
+          EOF
+
+          node convert.js
 
       - name: Upload Scanner Report CSV
         uses: actions/upload-artifact@v4
