@@ -1,4 +1,4 @@
-name: Salesforce Code Analyzer v5 - JSON to CSV
+name: Salesforce Code Analyzer v5
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
           mkdir -p ~/.sf
           echo '{"plugins":{"autoInstall":false}}' > ~/.sf/sf-config.json
 
-      - name: Uninstall any conflicting scanner plugin
+      - name: Uninstall conflicting plugins
         run: |
           sf plugins uninstall @salesforce/sfdx-scanner || true
           sf plugins uninstall @salesforce/plugin-code-analyzer || true
@@ -52,10 +52,24 @@ jobs:
         run: |
           cat > convert.js << 'EOF'
           const fs = require('fs');
-          const report = JSON.parse(fs.readFileSync('scanner-report.json', 'utf8'));
+          const jsonPath = 'scanner-report.json';
+
+          if (!fs.existsSync(jsonPath)) {
+            console.error('scanner-report.json not found.');
+            process.exit(1);
+          }
+
+          const report = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+
+          if (!Array.isArray(report.results)) {
+            console.warn('No violations found or unexpected JSON format.');
+            fs.writeFileSync('scanner-report.csv', 'fileName,line,column,ruleName,severity,message\n');
+            process.exit(0);
+          }
+
           const headers = ["fileName", "line", "column", "ruleName", "severity", "message"];
           const rows = report.results.map(r => [
-              r.fileName, r.line, r.column, r.ruleName, r.severity, `"${r.message.replace(/"/g, '""')}"`
+              r.fileName, r.line, r.column, r.ruleName, r.severity, `"${(r.message || '').replace(/"/g, '""')}"`
           ]);
           const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
           fs.writeFileSync('scanner-report.csv', csv);
