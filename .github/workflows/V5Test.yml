@@ -34,22 +34,43 @@ jobs:
           sf plugins uninstall @salesforce/sfdx-scanner || true
           sf plugins uninstall @salesforce/plugin-code-analyzer || true
 
-      - name: Install Code Analyzer Plugin v5.0.0
+      - name: Install Code Analyzer Plugin v5.1.0
         run: sf plugins install @salesforce/plugin-code-analyzer@5.1.0
 
       - name: Confirm Installed Plugins
         run: sf plugins
 
-      - name: Run Salesforce Code Analyzer - Output JSON
+      - name: Get sanitized commit message
+        id: commit
+        run: |
+          raw_message=$(git log -1 --pretty=format:%s)
+          safe_message=$(echo "$raw_message" | sed 's/[^a-zA-Z0-9_-]/_/g' | cut -c1-50)
+          echo "label=$safe_message" >> $GITHUB_OUTPUT
+
+      - name: Run Salesforce Code Analyzer - Output CSV
         run: |
           sf code-analyzer run \
-            --workspace "force-app\main\default\classes\Demo.cls" \
+            --workspace "force-app/main/default/classes/Demo.cls" \
             --rule-selector AvoidDebugStatements \
-            --output-file scanner-report.csv \
+            --output-format csv \
+            --output-file scanner-report-${{ steps.commit.outputs.label }}.csv \
             --config-file code-analyzer.yml
 
-      - name: Upload Scanner Report CSV
+      - name: Upload Scanner Report as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: code-analyzer-report
-          path: scanner-report.csv
+          name: code-analyzer-report-${{ steps.commit.outputs.label }}
+          path: scanner-report-${{ steps.commit.outputs.label }}.csv
+
+      - name: Commit and push report to `scanner-reports` branch
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git fetch origin
+          git switch --create scanner-reports || git switch scanner-reports
+
+          cp scanner-report-${{ steps.commit.outputs.label }}.csv scanner-report-${{ steps.commit.outputs.label }}.csv
+          git add scanner-report-${{ steps.commit.outputs.label }}.csv
+          git commit -m "📦 Add scan report for: ${{ steps.commit.outputs.label }}" || echo "No changes to commit"
+          git push origin scanner-reports
