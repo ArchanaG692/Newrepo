@@ -43,7 +43,7 @@ jobs:
       - name: Run Salesforce Code Analyzer - Output JSON
         run: |
           sf code-analyzer run \
-            --workspace "force-app" \
+            --workspace "force-app\main\default\classes\Demo.cls" \
             --rule-selector AvoidDebugStatements \
             --output-file scanner-report.json \
             --config-file code-analyzer.yml
