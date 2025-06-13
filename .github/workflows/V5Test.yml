@@ -40,7 +40,7 @@ jobs:
       - name: Confirm Installed Plugins
         run: sf plugins
 
-      - name: Run Salesforce Code Analyzer - Output JSON
+      - name: Run Salesforce Code Analyzer 
         run: |
           sf code-analyzer run \
             --workspace "force-app\main\default\classes\Demo.cls" \
