@@ -25,8 +25,8 @@ engines:
   cpd:
     disable_engine: true
 
-rules:
-  ClassWithTooManyFields: {}
+# rules:
+#   ClassWithTooManyFields: {}
 
 
 
