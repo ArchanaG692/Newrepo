@@ -47,6 +47,12 @@ jobs:
             --rule-selector AvoidDebugStatements \
             --output-file scanner-report.json \
             --config-file code-analyzer.yml
+      
+      - name: Upload Raw JSON Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-analyzer-json
+          path: scanner-report.json      
 
       - name: Convert JSON report to CSV
         run: |
