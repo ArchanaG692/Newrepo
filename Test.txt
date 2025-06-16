@@ -40,7 +40,9 @@ jobs:
           echo '{"plugins":{"autoInstall":false}}' > ~/.sf/sf-config.json
 
       - name: Install Code Analyzer Plugin v5
-        run: sf plugins install @salesforce/plugin-code-analyzer@latest
+        run: |
+          sf plugins uninstall @salesforce/plugin-code-analyzer || true
+          sf plugins install @salesforce/plugin-code-analyzer@5.1.0
 
       - name: Confirm Only v5 Plugin Is Present
         run: sf plugins | grep code-analyzer
@@ -106,7 +108,6 @@ jobs:
 
               echo "    }" >> "$temp_file"
               echo "}" >> "$temp_file"
-              cat "$temp_file"
 
             elif [[ "$file" == *.js ]]; then
               echo "// LWC JavaScript File" > "$temp_file"
@@ -122,26 +123,18 @@ jobs:
             echo "Created temp file: $temp_file"
           done
 
-          echo "====== Final Line Number Mapping ======"
-          cat line_number_mapping.txt || echo "No line number mapping available."
-          echo "Generated temp files:"
-          ls -l temp_scanner_files
-
-          if [ ! -s changed_cls_lwc_files.txt ]; then
-            echo "No temp files created. Exiting."
-            exit 0
-          fi
-
       - name: Run Salesforce Code Analyzer v5 - PMD Best Practices
         run: |
           sf code-analyzer run \
             --workspace temp_scanner_files \
             --config-file code-analyzer.yml \
             --rule-selector AvoidDebugStatements \
+            --rule-selector AvoidHardcodingId \
+            --rule-selector ApexCRUDViolation \
             --output-format csv \
             --output-file scanner-report.csv
         env:
-          NODE_OPTIONS: --max-old-space-size=4096
+          NODE_OPTIONS: --max-old-space-size=6144
 
       - name: Generate Unique File Name for Scanner Report
         run: |
@@ -150,16 +143,6 @@ jobs:
           echo "REPORT_FILE=$REPORT_FILE" >> $GITHUB_ENV
 
       - name: Save Scanner Report Before Branch Checkout
-        if: always()
-        run: |
-          if [ ! -f scanner-report.csv ]; then
-            echo " scanner-report.csv file not found! Creating an empty report."
-            echo "Problem,Severity,File,TempLine,Column,Rule,Description,URL,Category,Engine,Commit,ActualLine" > scanner-report.csv
-          fi
-          mkdir -p /tmp/artifact_backup
-          cp scanner-report.csv /tmp/artifact_backup/${{ env.REPORT_FILE }}
-
-      - name: Backup Scanner Report
         if: always()
         run: |
           mkdir -p /tmp/artifact_backup
