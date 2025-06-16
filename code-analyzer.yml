@@ -27,11 +27,11 @@ engines:
 
 rules:
   AvoidDebugStatements:
-    severity: "Moderate"
+    severity: 3
     tags: ["Performance"]
 
   ApexCRUDViolation:
-    severity: "High"
+    severity: 1
     tags: ["Security"]
 
   
