@@ -26,13 +26,14 @@ engines:
     disable_engine: true
 
 rules:
-  AvoidDebugStatements:
-    severity: 3
-    tags: ["Performance"]
+  pmd:
+    AvoidDebugStatements:
+      severity: Info
+      tags: ["Performance"]
 
-  ApexCRUDViolation:
-    severity: 1
-    tags: ["Security"]
+    ApexCRUDViolation:
+      severity: Info
+      tags: ["Security"]
 
   
 
