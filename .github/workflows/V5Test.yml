@@ -45,6 +45,7 @@ jobs:
           sf code-analyzer run \
             --workspace "force-app\main\default\classes\Demo.cls" \
             --rule-selector AvoidDebugStatements \
+            --rule-selector ApexCRUDViolation \
             --output-file scanner-report.csv \
             --config-file code-analyzer.yml
 
