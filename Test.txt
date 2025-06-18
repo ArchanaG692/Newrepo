@@ -49,6 +49,7 @@ jobs:
 
       - name: Get changed lines and create temporary files
         id: get-changes
+        shell: bash
         run: |
           mkdir -p temp_scanner_files
           > changed_cls_lwc_files.txt
@@ -103,10 +104,6 @@ jobs:
                   has_valid_line=true
                 fi
               done < "line_number_mapping_${file//\//_}.txt"
-
-              if ! $has_valid_line; then
-                echo "        System.debug('No valid lines found');" >> "$temp_file"
-              fi
 
               echo "    }" >> "$temp_file"
               echo "}" >> "$temp_file"
