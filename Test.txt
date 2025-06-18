@@ -122,6 +122,9 @@ jobs:
 
             echo "$temp_file" >> changed_cls_lwc_files.txt
             echo "Created temp file: $temp_file"
+            echo "==== Contents of $temp_file ===="
+            cat "$temp_file"
+            echo "================================"
           done
 
       - name: Run Salesforce Code Analyzer v5 - PMD Best Practices
