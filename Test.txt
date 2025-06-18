@@ -95,7 +95,9 @@ jobs:
                     echo "        // skipped standalone brace: $trimmed" >> "$temp_file"
                     continue
                   fi
-                  [[ "$trimmed" =~ ;$ ]] || trimmed="$trimmed;"
+                  if [[ ! "$trimmed" =~ ;$ ]]; then
+                    trimmed="$trimmed;"
+                  fi
                   echo "        $trimmed" >> "$temp_file"
                   echo "$temp_file,$trimmed" >> line_number_mapping.txt
                   has_valid_line=true
@@ -113,7 +115,9 @@ jobs:
               echo "// LWC JavaScript File" > "$temp_file"
               while IFS= read -r line_content; do
                 trimmed=$(echo "$line_content" | sed 's/^[ \t]*//;s/[ \t]*$//')
-                [[ "$trimmed" =~ ;$ ]] || trimmed="$trimmed;"
+                if [[ ! "$trimmed" =~ ;$ ]]; then
+                  trimmed="$trimmed;"
+                fi
                 echo "    $trimmed" >> "$temp_file"
                 echo "$temp_file,0,$trimmed" >> line_number_mapping.txt
               done < "line_number_mapping_${file//\//_}.txt"
