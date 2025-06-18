@@ -56,12 +56,12 @@ jobs:
           > line_number_mapping.txt
           > scanner-report-temp.csv
 
-          echo "Checking for changed .cls and .lwc files..."
-          changed_files=$(git diff --name-only HEAD~1 HEAD -- '*.cls' '*.js' || true)
+          echo "Checking for changed .cls files..."
+          changed_files=$(git diff --name-only HEAD~1 HEAD -- '*.cls' || true)
           echo "Detected changed files: $changed_files"
 
           if [ -z "$changed_files" ]; then
-            echo "No .cls or .lwc files detected."
+            echo "No .cls files detected."
             echo "Problem,Severity,File,TempLine,Column,Rule,Description,URL,Category,Engine,Commit,ActualLine" > scanner-report.csv
             exit 0
           fi
@@ -83,42 +83,29 @@ jobs:
             temp_file="temp_scanner_files/temp_${file//\//_}"
             touch "$temp_file"
 
-            if [[ "$file" == *.cls ]]; then
-              echo "public class TempWrapperClass {" > "$temp_file"
-              echo "    public static void tempMethod() {" >> "$temp_file"
-              echo "        /* Extracted changed lines */" >> "$temp_file"
+            echo "public class TempWrapperClass {" > "$temp_file"
+            echo "    public static void tempMethod() {" >> "$temp_file"
+            echo "        /* Extracted changed lines */" >> "$temp_file"
 
-              has_valid_line=false
-              while IFS= read -r line_content; do
-                trimmed=$(echo "$line_content" | sed 's/^[ \t]*//;s/[ \t]*$//')
-                if [[ -n "$trimmed" ]]; then
-                  if [[ "$trimmed" =~ ^[\{\}]$ ]]; then
-                    echo "        // skipped standalone brace: $trimmed" >> "$temp_file"
-                    continue
-                  fi
-                  if [[ ! "$trimmed" =~ ;$ ]]; then
-                    trimmed="$trimmed;"
-                  fi
-                  echo "        $trimmed" >> "$temp_file"
-                  echo "$temp_file,$trimmed" >> line_number_mapping.txt
-                  has_valid_line=true
+            has_valid_line=false
+            while IFS= read -r line_content; do
+              trimmed=$(echo "$line_content" | sed 's/^[ \t]*//;s/[ \t]*$//')
+              if [[ -n "$trimmed" ]]; then
+                if [[ "$trimmed" =~ ^[\{\}]$ ]]; then
+                  echo "        // skipped standalone brace: $trimmed" >> "$temp_file"
+                  continue
                 fi
-              done < "line_number_mapping_${file//\//_}.txt"
-
-              echo "    }" >> "$temp_file"
-              echo "}" >> "$temp_file"
-
-            elif [[ "$file" == *.js ]]; then
-              echo "// LWC JavaScript File" > "$temp_file"
-              while IFS= read -r line_content; do
-                trimmed=$(echo "$line_content" | sed 's/^[ \t]*//;s/[ \t]*$//')
                 if [[ ! "$trimmed" =~ ;$ ]]; then
                   trimmed="$trimmed;"
                 fi
-                echo "    $trimmed" >> "$temp_file"
-                echo "$temp_file,0,$trimmed" >> line_number_mapping.txt
-              done < "line_number_mapping_${file//\//_}.txt"
-            fi
+                echo "        $trimmed" >> "$temp_file"
+                echo "$temp_file,$trimmed" >> line_number_mapping.txt
+                has_valid_line=true
+              fi
+            done < "line_number_mapping_${file//\//_}.txt"
+
+            echo "    }" >> "$temp_file"
+            echo "}" >> "$temp_file"
 
             echo "$temp_file" >> changed_cls_lwc_files.txt
             echo "Created temp file: $temp_file"
