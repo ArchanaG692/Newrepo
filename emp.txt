@@ -1,1 +1,0 @@
-The engine with name 'pmd' threw an unexpected error: Error: The following call to 'java' exited with non-zero exit code. Command: /home/runner/runner-tool-cache/Java_Temurin-Hotspot_jdk/11.0.27-6/x64/bin/java
