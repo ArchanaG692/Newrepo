@@ -40,15 +40,23 @@ jobs:
       - name: Confirm Installed Plugins
         run: sf plugins
 
-      - name: Prepare Single File Workspace
+      - name: Detect changed .js files and copy to temp workspace
         run: |
-          mkdir -p eslint-temp/force-app/main/default/lwc
-          cp force-app/main/default/lwc/demo.js eslint-temp/force-app/main/default/lwc/demo.js
+          mkdir -p eslint-temp
+
+          # Detect only .js files that are added/modified
+          git diff --name-only origin/main HEAD | grep '\.js$' | while read file; do
+            echo "📄 Found JS file: $file"
+            mkdir -p "$(dirname "eslint-temp/$file")"
+            cp "$file" "eslint-temp/$file"
+          done
+
+          echo "✅ Selected JS files copied to eslint-temp"
 
       - name: Run Salesforce Code Analyzer - Output JSON
         run: |
           sf code-analyzer run \
-            --workspace "eslint-temp"
+            --workspace "$file"
             --output-file scanner-report.csv \
             --config-file code-analyzer.yml
 
