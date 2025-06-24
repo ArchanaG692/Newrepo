@@ -43,7 +43,7 @@ jobs:
       - name: Run Salesforce Code Analyzer - Output JSON
         run: |
           sf code-analyzer run \
-            --workspace "force-app\main\default\lwc\demo.js" \
+            --workspace "force-app" \
             --output-file scanner-report.csv \
             --config-file code-analyzer.yml
 

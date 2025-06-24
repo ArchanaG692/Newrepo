@@ -13,7 +13,12 @@ engines:
   pmd:
     file_extensions: {"apex": [".cls",".trigger"]}
   eslint:
-    disable_engine: true
+    file_extensions: { "javascript": [".js"] }
+    include_paths:
+      - force-app\main\default\lwc\demo.js
+    exclude_paths:
+      - "**/node_modules/**"
+      - "**/coverage/**"
   retire-js:
     disable_engine: true
   regex:
@@ -35,7 +40,9 @@ rules:
       severity: Info
       tags: ["Security"]
 
-  
+  eslint:
+    recommended:
+      severity: Error
 
 
 
