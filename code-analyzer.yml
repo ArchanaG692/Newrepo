@@ -42,7 +42,7 @@ rules:
 
   eslint:
     recommended:
-      severity: Error
+      severity: High
 
 
 
