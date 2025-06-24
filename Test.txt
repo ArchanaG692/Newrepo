@@ -1,0 +1,176 @@
+name: V5 Code Scan
+
+on:
+  push:
+    branches:
+      - "**"
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  quality-gate-code-check:
+    runs-on: 
+      group: cvs-linux-self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '>=20.9.0'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      - name: Install Salesforce CLI
+        run: npm install @salesforce/cli --global
+
+      - name: Disable Auto Plugin Install
+        run: |
+          mkdir -p ~/.sf
+          echo '{"plugins":{"autoInstall":false}}' > ~/.sf/sf-config.json
+
+      - name: Install Code Analyzer Plugin v5
+        run: |
+          sf plugins uninstall @salesforce/plugin-code-analyzer || true
+          sf plugins install @salesforce/plugin-code-analyzer@5.1.0
+
+      - name: Confirm Only v5 Plugin Is Present
+        run: sf plugins | grep code-analyzer
+
+      - name: Get changed lines and create temporary files
+        id: get-changes
+        shell: bash
+        run: |
+          mkdir -p temp_scanner_files
+          > changed_cls_lwc_files.txt
+          > line_number_mapping.txt
+          > scanner-report-temp.csv
+
+          echo "Checking for changed .cls files..."
+          changed_files=$(git diff --name-only HEAD~1 HEAD -- '*.cls' || true)
+          echo "Detected changed files: $changed_files"
+
+          if [ -z "$changed_files" ]; then
+            echo "No .cls files detected."
+            echo "Problem,Severity,File,TempLine,Column,Rule,Description,URL,Category,Engine,Commit,ActualLine" > scanner-report.csv
+            exit 0
+          fi
+
+          for file in $changed_files; do
+            echo "Processing file: $file"
+            extracted_lines=$(git diff --unified=0 HEAD~1 HEAD -- "$file" | awk '
+              /^@@/ { next }
+              /^\+/ && $0 !~ /^(diff --git|index|---|\+\+\+|@@|b\/force-app)/ {
+                print substr($0, 2);
+              }')
+
+            if [ -z "$extracted_lines" ]; then
+              echo "No valid lines found for $file. Skipping..."
+              continue
+            fi
+
+            echo "$extracted_lines" > "line_number_mapping_${file//\//_}.txt"
+            temp_file="temp_scanner_files/temp_${file//\//_}"
+            touch "$temp_file"
+
+            echo "public class TempWrapperClass {" > "$temp_file"
+            echo "    public static void tempMethod() {" >> "$temp_file"
+            echo "        /* Extracted changed lines */" >> "$temp_file"
+
+            has_valid_line=false
+            while IFS= read -r line_content; do
+              trimmed=$(echo "$line_content" | sed 's/^[ \t]*//;s/[ \t]*$//')
+              if [[ -n "$trimmed" ]]; then
+                if [[ "$trimmed" =~ ^[\{\}]$ ]]; then
+                  echo "        // skipped standalone brace: $trimmed" >> "$temp_file"
+                  continue
+                fi
+                if [[ ! "$trimmed" =~ ;$ ]]; then
+                  trimmed="$trimmed;"
+                fi
+                echo "        $trimmed" >> "$temp_file"
+                echo "$temp_file,$trimmed" >> line_number_mapping.txt
+                has_valid_line=true
+              fi
+            done < "line_number_mapping_${file//\//_}.txt"
+
+            echo "    }" >> "$temp_file"
+            echo "}" >> "$temp_file"
+
+            echo "$temp_file" >> changed_cls_lwc_files.txt
+            echo "Created temp file: $temp_file"
+            echo "==== Contents of $temp_file ===="
+            cat "$temp_file"
+            echo "================================"
+          done
+
+      - name: Run Salesforce Code Analyzer v5 - PMD Best Practices
+        run: |
+          sf code-analyzer run \
+            --workspace temp_scanner_files \
+            --config-file code-analyzer.yml \
+            --rule-selector AvoidDebugStatements \
+            --rule-selector AvoidHardcodingId \
+            --rule-selector ApexCRUDViolation \
+            --output-format csv \
+            --output-file scanner-report.csv
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      - name: Generate Unique File Name for Scanner Report
+        run: |
+          COMMIT_LABEL=$(git log -1 --pretty=format:'%s' | tr ' ' '_' | tr -cd 'A-Za-z0-9_.-')
+          REPORT_FILE="${COMMIT_LABEL}.csv"
+          echo "REPORT_FILE=$REPORT_FILE" >> $GITHUB_ENV
+
+      - name: Save Scanner Report Before Branch Checkout
+        if: always()
+        run: |
+          mkdir -p /tmp/artifact_backup
+          cp scanner-report.csv /tmp/artifact_backup/${{ env.REPORT_FILE }}
+
+      - name: Discard uncommitted changes (force clean)
+        run: |
+          git reset --hard
+          git clean -fd
+          git checkout Scanner_Reports
+
+      - name: Commit and Push Scanner Report to `Scanner_Reports` Branch
+        if: always()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          BRANCH_NAME="Scanner_Reports"
+
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
+            git checkout $BRANCH_NAME
+          else
+            git checkout -b $BRANCH_NAME
+            git push --set-upstream origin $BRANCH_NAME
+          fi
+
+          git pull origin $BRANCH_NAME --rebase
+          mkdir -p Artifact
+          cp /tmp/artifact_backup/${{ env.REPORT_FILE }} Artifact/${{ env.REPORT_FILE }}
+          git add Artifact/${{ env.REPORT_FILE }}
+          git commit -m " Auto-update scanner report (${REPORT_FILE}) in Artifact folder for branch $BRANCH_NAME" || echo "No changes to commit"
+          git push origin $BRANCH_NAME
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+
+      - name: Restore scanner-report.csv for Blocking Step
+        if: always()
+        run: |
+          echo "Restoring scanner-report.csv to $GITHUB_WORKSPACE for blocking step"
+          cp /tmp/artifact_backup/${{ env.REPORT_FILE }} "$GITHUB_WORKSPACE/scanner-report.csv"
