@@ -40,10 +40,15 @@ jobs:
       - name: Confirm Installed Plugins
         run: sf plugins
 
+      - name: Prepare Single File Workspace
+        run: |
+          mkdir -p eslint-temp/force-app/main/default/lwc
+          cp force-app/main/default/lwc/demo.js eslint-temp/force-app/main/default/lwc/demo.js
+
       - name: Run Salesforce Code Analyzer - Output JSON
         run: |
           sf code-analyzer run \
-            --eslint-target "force-app/main/default/lwc/demo.js"
+            --eslint-target "eslint-temp"
             --output-file scanner-report.csv \
             --config-file code-analyzer.yml
 
