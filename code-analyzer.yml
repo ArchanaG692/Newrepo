@@ -11,8 +11,7 @@
 
 engines:
   pmd:
-    file_extensions:
-      apex: [".cls",".trigger"]
+    disable_engine: true
   eslint:
     file_extensions: 
       javascript : [".js"] 
