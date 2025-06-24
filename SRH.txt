@@ -1,24 +1,23 @@
 public with sharing class ScannerReportHandler {
     private static Boolean isProcessing = false;
-    private static final String RECORD_TYPE_DEVELOPER_NAME = 'Your_RecordType_DevName'; // 🔁 Replace with your actual record type DeveloperName
+    private static final String RECORD_TYPE_DEVELOPER_NAME = 'MCSE_Code_Scan'; 
 
     @future
     public static void processFiles(Set<Id> contentDocumentIds) {
         if (isProcessing) {
-            System.debug('⚠️ Process already running. Skipping to prevent recursion.');
+            //System.debug(' Process already running. Skipping to prevent recursion.');
             return;
         }
 
         isProcessing = true;
-        System.debug('🔍 Processing Scanner Report Files for ContentDocumentIds: ' + contentDocumentIds);
+        
 
         if (contentDocumentIds.isEmpty()) {
-            System.debug('⚠️ No ContentDocumentIds provided. Skipping processing.');
             isProcessing = false;
             return;
         }
 
-        // 🔍 Fetch RecordTypeId dynamically
+        //  Fetch RecordTypeId dynamically
         Id caseRecordTypeId;
         try {
             caseRecordTypeId = [
@@ -28,7 +27,6 @@ public with sharing class ScannerReportHandler {
                 LIMIT 1
             ].Id;
         } catch (Exception e) {
-            System.debug('❌ Failed to fetch RecordTypeId: ' + e.getMessage());
             isProcessing = false;
             return;
         }
@@ -41,7 +39,6 @@ public with sharing class ScannerReportHandler {
         ];
 
         if (contentVersions.isEmpty()) {
-            System.debug('⚠️ No matching ContentVersion records found.');
             isProcessing = false;
             return;
         }
@@ -50,19 +47,16 @@ public with sharing class ScannerReportHandler {
         Map<Id, Id> caseToFileMap = new Map<Id, Id>();
 
         for (ContentVersion cv : contentVersions) {
-            System.debug('📂 Processing File: ' + cv.Title + ' | ContentDocumentId: ' + cv.ContentDocumentId);
 
             if (cv.Title.contains('Code Scanner') || cv.Title.contains('Code Scanner Delta')) {
-                System.debug('✅ File Matches Condition: ' + cv.Title);
 
                 Case newCase = new Case();
                 newCase.RecordTypeId = caseRecordTypeId;
                 newCase.File_Name__c = cv.Title;
                 newCase.Status = 'New';
-                newCase.Origin = 'Email';         // ✅ Set Origin
-                newCase.Priority = 'Medium';      // ✅ Set Priority
+                newCase.Origin = 'Code Scan';   
 
-                String commitAuthor = '';         // ✅ For Subject
+                String commitAuthor = '';         
 
                 try {
                     ContentVersion cvWithData = [
@@ -81,7 +75,9 @@ public with sharing class ScannerReportHandler {
 
                         Integer targetBranchIndex = headers.indexOf('TargetBranch');
                         Integer commitIndex = headers.indexOf('Commit');
+                        Integer severityIndex = headers.indexOf('Severity');
 
+                        Boolean setPriority = false;
                         for (Integer i = 1; i < csvLines.size(); i++) {
                             List<String> values = csvLines[i].split(',');
 
@@ -95,17 +91,30 @@ public with sharing class ScannerReportHandler {
                                 newCase.Case_Created_By__c = commitValue;
                                 commitAuthor = commitValue;
                             }
-
+							
+                            if (!setPriority && severityIndex != -1 && values.size() > severityIndex) {
+                                String severityValue = values[severityIndex].trim();
+                                if (severityValue == '1' || severityValue == '2') {
+                                    newCase.Priority = 'High';
+                                    setPriority = true;
+                                } else if (severityValue == '3') {
+                                    newCase.Priority = 'Medium';
+                                    setPriority = true;
+                                } else if (severityValue == '4' || severityValue == '5') {
+                                    newCase.Priority = 'Low';
+                                    setPriority = true;
+                                }
+                            }
                             if (newCase.Target_Environment__c != null || newCase.Case_Created_By__c != null) {
                                 break;
                             }
                         }
                     }
                 } catch (Exception e) {
-                    System.debug('❌ Error reading CSV content: ' + e.getMessage());
+                    //System.debug(' Error reading CSV content: ' + e.getMessage());
                 }
 
-                newCase.Subject = commitAuthor + ' - ' + cv.Title;  // ✅ Dynamic Subject
+                newCase.Subject = commitAuthor + ' - ' + cv.Title;  
 
                 casesToInsert.add(newCase);
                 caseToFileMap.put(cv.ContentDocumentId, null);
@@ -115,7 +124,6 @@ public with sharing class ScannerReportHandler {
         if (!casesToInsert.isEmpty()) {
             try {
                 insert casesToInsert;
-                System.debug('✅ Successfully inserted ' + casesToInsert.size() + ' Case records.');
 
                 Integer index = 0;
                 for (Case createdCase : casesToInsert) {
@@ -125,12 +133,10 @@ public with sharing class ScannerReportHandler {
                 }
 
             } catch (DmlException e) {
-                System.debug('❌ Error inserting Cases: ' + e.getMessage());
                 isProcessing = false;
                 return;
             }
         } else {
-            System.debug('⚠️ No Cases to insert.');
             isProcessing = false;
             return;
         }
@@ -162,9 +168,8 @@ public with sharing class ScannerReportHandler {
         if (!linksToInsert.isEmpty()) {
             try {
                 insert linksToInsert;
-                System.debug('✅ Successfully linked ' + linksToInsert.size() + ' files to Case records.');
             } catch (DmlException e) {
-                System.debug('❌ Error linking files to Case: ' + e.getMessage());
+                //System.debug(' Error linking files to Case: ' + e.getMessage());
             }
         }
 
