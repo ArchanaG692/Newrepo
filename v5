@@ -137,7 +137,7 @@ jobs:
               cat "$temp_file"
             elif [[ "$file" == *.js ]]; then
               echo "// LWC JavaScript File" > "$temp_file"
-
+              echo "function tempWrapper() {" >> "$temp_file"
               while IFS=, read -r line_number line_content; do
                 line_content_trimmed=$(echo "$line_content" | sed 's/^[ \t]*//;s/[ \t]*$//')
                 if [[ -n "$line_content_trimmed" ]]; then
@@ -146,6 +146,8 @@ jobs:
                 fi
                 
               done < "line_number_mapping_${file//\//_}.txt"
+              echo "}" >> "$temp_file"
+
               elif [[ "$file" == *.html ]]; then
               echo "<!-- LWC HTML File -->" > "$temp_file"
               while IFS=, read -r line_number line_content; do
@@ -233,7 +235,7 @@ jobs:
               cp "$file" "$newPath"
 
               # Run the scanner on the new valid path
-              sf code-analyzer run --workspace "$newPath" --output-file "scanner-report-partial.csv" -- || echo "Scanner run failed for $file"
+              sf code-analyzer run --workspace "$newPath" --output-file "scanner-report-partial.csv" || echo "Scanner run failed for $file"
 
               # Clean up afterwards
               rm -f "$newPath"
