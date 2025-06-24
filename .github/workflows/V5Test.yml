@@ -43,9 +43,7 @@ jobs:
       - name: Run Salesforce Code Analyzer - Output JSON
         run: |
           sf code-analyzer run \
-            --workspace "force-app\main\default\classes\Demo.cls" \
-            --rule-selector AvoidDebugStatements \
-            --rule-selector ApexCRUDViolation \
+            --workspace "force-app\main\default\lwc\demo.js" \
             --output-file scanner-report.csv \
             --config-file code-analyzer.yml
 
