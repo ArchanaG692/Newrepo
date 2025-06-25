@@ -12,7 +12,7 @@ public with sharing class CSVDataController {
         CSVDataResponse response = new CSVDataResponse();
 
         try {
-            // Step 1: Query all attachments that start with 'Code Scanner Report' and end with '.csv'
+            // Step 1: Query all CSV attachments on the case
             List<Attachment> attachments = [
                 SELECT Id, Body, Name
                 FROM Attachment
@@ -21,55 +21,77 @@ public with sharing class CSVDataController {
                 ORDER BY CreatedDate DESC
             ];
 
-            if (attachments.isEmpty()) {
-                //System.debug('️ No matching CSV files found for Case ID: ' + caseId);
-                return response;
-            }
+            if (attachments.isEmpty()) return response;
 
-            // Step 2: Process each matching file
             for (Attachment csvFile : attachments) {
                 Blob csvBlob = csvFile.Body;
                 String csvContent = csvBlob.toString();
 
                 List<String> lines = csvContent.split('\n');
-                if (lines.isEmpty()) {
-                    continue;
+                if (lines.isEmpty()) continue;
+
+                // Step 2: Parse headers
+                List<String> headers = parseCSVLine(lines[0]);
+                List<String> lowercaseHeaders = new List<String>();
+                for (String h : headers) {
+                    lowercaseHeaders.add(h.trim().toLowerCase());
                 }
 
-                List<String> headers = lines[0].split(',');
-
+                // Step 3: Parse each line
                 for (Integer i = 1; i < lines.size(); i++) {
-                    List<String> values = lines[i].split(',');
+                    List<String> values = parseCSVLine(lines[i]);
+                    if (values.size() != headers.size()) continue;
 
-                    if (values.size() == headers.size()) {
-                        Map<String, String> rowData = new Map<String, String>();
-                        for (Integer j = 0; j < headers.size(); j++) {
-                            String fieldValue = values[j].trim().replaceAll('^\"|\"$', '');
-                            rowData.put(headers[j].trim(), fieldValue);
-                        }
-
-                        // Count violations
-                        if (rowData.containsKey('File')) {
-                            String filePath = rowData.get('File').trim();
-                            if (filePath.contains('classes')) {
-                                response.clsViolationCount++;
-                            } else if (filePath.contains('lwc')) {
-                                response.lwcViolationCount++;
-                            } else if (filePath.contains('aura')) {
-                                response.auraViolationCount++;
-                            } else if (filePath.contains('objects')) {
-                                response.objectsViolationCount++;
-                            }
-                        }
-
-                        response.csvData.add(rowData);
+                    Map<String, String> rowData = new Map<String, String>();
+                    for (Integer j = 0; j < headers.size(); j++) {
+                        rowData.put(lowercaseHeaders[j], values[j].trim().replaceAll('^\"|\"$', ''));
                     }
+
+                    // Step 4: Count violation types using file path
+                    if (rowData.containsKey('file')) {
+                        String filePath = rowData.get('file').toLowerCase();
+
+                        // Debug output (optional)
+                        // System.debug('📂 File path: ' + filePath);
+
+                        if (filePath.contains('/classes/')) {
+                            response.clsViolationCount++;
+                        } else if (filePath.contains('/lwc/')) {
+                            response.lwcViolationCount++;
+                        } else if (filePath.contains('/aura/')) {
+                            response.auraViolationCount++;
+                        } else if (filePath.contains('/objects/')) {
+                            response.objectsViolationCount++;
+                        }
+                    }
+
+                    response.csvData.add(rowData);
                 }
             }
         } catch (Exception e) {
-            //System.debug('❌ Error processing CSV: ' + e.getMessage());
+            System.debug('❌ Error parsing CSV: ' + e.getMessage());
         }
 
         return response;
+    }
+
+    private static List<String> parseCSVLine(String csvLine) {
+        List<String> columns = new List<String>();
+        Boolean insideQuote = false;
+        String currentValue = '';
+
+        for (Integer i = 0; i < csvLine.length(); i++) {
+            String currentChar = csvLine.substring(i, i + 1);
+            if (currentChar == '"') {
+                insideQuote = !insideQuote;
+            } else if (currentChar == ',' && !insideQuote) {
+                columns.add(currentValue.trim());
+                currentValue = '';
+            } else {
+                currentValue += currentChar;
+            }
+        }
+        columns.add(currentValue.trim());
+        return columns;
     }
 }
