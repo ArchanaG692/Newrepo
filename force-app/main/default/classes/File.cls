@@ -1,5 +1,5 @@
 public with sharing class File {
-    
+
     public static void processNewFiles(List<ContentVersion> contentVersions) {
         List<Id> contentDocIds = new List<Id>();
 
@@ -10,114 +10,94 @@ public with sharing class File {
         }
 
         if (!contentDocIds.isEmpty()) {
-            importVulnerabilityData(contentDocIds);  // ✅ Call correctly defined method
+            importVulnerabilityData(contentDocIds);
         }
     }
 
-    // ✅ Ensure this method exists with the correct signature
     public static void importVulnerabilityData(List<Id> contentDocIds) {
         try {
-            // Fetch ContentVersion records for the given ContentDocumentIds
-            List<ContentVersion> fileList = [SELECT Id, VersionData, ContentDocumentId
-                                             FROM ContentVersion
-                                             WHERE ContentDocumentId IN :contentDocIds
-                                             ORDER BY CreatedDate DESC];
+            List<ContentVersion> fileList = [
+                SELECT Id, VersionData, ContentDocumentId
+                FROM ContentVersion
+                WHERE ContentDocumentId IN :contentDocIds
+                ORDER BY CreatedDate DESC
+            ];
 
-            if (fileList.isEmpty()) {
-                return;
-            }
+            if (fileList.isEmpty()) return;
 
             List<Vulnerability__c> newRecords = new List<Vulnerability__c>();
 
             for (ContentVersion file : fileList) {
-                if (file.VersionData == null) {
-                    continue;
-                }
+                if (file.VersionData == null) continue;
 
-
-                // Convert the file content (CSV) to string
                 String csvContent = file.VersionData.toString();
-                List<String> lines = csvContent.split('\\n');
+                List<String> lines = csvContent.split('\n');
+                if (lines.isEmpty()) continue;
 
-                if (lines.isEmpty()) {
-                    continue;
-                }
-
-                // Extract headers
+                // Parse headers
                 List<String> headers = parseCSVLine(lines[0]);
                 Map<String, Integer> columnMap = new Map<String, Integer>();
 
                 for (Integer i = 0; i < headers.size(); i++) {
-                    columnMap.put(headers[i].trim().toLowerCase(), i);
+                    columnMap.put(headers[i].trim().toLowerCase(), i);  // Case-insensitive mapping
                 }
 
-
-                // Required field mappings
+                // V5 field mapping
                 Map<String, String> fieldMappings = new Map<String, String>{
-                    //'problem' => 'problem', 
-                    
-                    'rule' => 'rule',
-                    'engine' => 'engine',
-                    'severity' => 'severity',
-                    'tags' => 'category',
-                    'file' => 'file',
-                    'startLine' => 'line',
-                    'startColumn' => 'column',
-                    'message' => 'description',
-                    'resources' => 'url',
-                    'commit' => 'commit', 
-                    'actualline' => 'actual line',
+                    'rule'         => 'rule',
+                    'engine'       => 'engine',
+                    'severity'     => 'severity',
+                    'tags'         => 'category',
+                    'file'         => 'file',
+                    'startline'    => 'line',
+                    'startcolumn'  => 'column',
+                    'message'      => 'description',
+                    'resources'    => 'url',
+                    'commit'       => 'commit',
+                    'actualline'   => 'actual line',
                     'targetbranch' => 'target branch'
-                        
                 };
 
-                // Validate all required fields exist in CSV
-                for (String field : fieldMappings.keySet()) {
-                    if (!columnMap.containsKey(field)) {
+                // Validate required headers
+                for (String key : fieldMappings.keySet()) {
+                    if (!columnMap.containsKey(key)) {
+                        System.debug('⚠️ Missing required column: ' + key);
                         return;
                     }
                 }
 
-                // Process CSV lines and create Vulnerability__c records
                 for (Integer i = 1; i < lines.size(); i++) {
                     List<String> columns = parseCSVLine(lines[i]);
-
-                    if (columns.size() < headers.size()) {
-                        continue;
-                    }
+                    if (columns.size() < headers.size()) continue;
 
                     Vulnerability__c vuln = new Vulnerability__c();
-                    //vuln.Problem__c = columns[columnMap.get('problem')].trim();
-                    vuln.Severity__c = columns[columnMap.get('severity')].trim();
-                    vuln.File__c = columns[columnMap.get('file')].trim();
-                    vuln.Line__c = columns[columnMap.get('startline')].trim();
-                    vuln.Column__c = columns[columnMap.get('startcolumn')].trim();
-                    vuln.Rule__c = columns[columnMap.get('rule')].trim();
-                    vuln.Description__c = columns[columnMap.get('message')].trim();
-                    vuln.URL__c = columns[columnMap.get('resources')].trim();
-                    vuln.Category__c = columns[columnMap.get('tags')].trim();
-                    vuln.Engine__c = columns[columnMap.get('engine')].trim();
-                    vuln.Commit__c = columns[columnMap.get('commit')].trim();
-                    vuln.ActualLine__c = columns[columnMap.get('actualline')].trim();
-                    vuln.TargetBranch__c = columns[columnMap.get('targetbranch')].trim();
+                    vuln.Rule__c          = columns[columnMap.get('rule')].trim();
+                    vuln.Engine__c        = columns[columnMap.get('engine')].trim();
+                    vuln.Severity__c      = columns[columnMap.get('severity')].trim();
+                    vuln.Category__c      = columns[columnMap.get('tags')].trim();
+                    vuln.File__c          = columns[columnMap.get('file')].trim();
+                    vuln.Line__c          = columns[columnMap.get('startline')].trim();
+                    vuln.Column__c        = columns[columnMap.get('startcolumn')].trim();
+                    vuln.Description__c   = columns[columnMap.get('message')].trim();
+                    vuln.URL__c           = columns[columnMap.get('resources')].trim();
+                    vuln.Commit__c        = columns[columnMap.get('commit')].trim();
+                    vuln.ActualLine__c    = columns[columnMap.get('actualline')].trim();
+                    vuln.TargetBranch__c  = columns[columnMap.get('targetbranch')].trim();
 
                     newRecords.add(vuln);
                 }
+            }
 
-                // Insert records in bulk
-                if (!newRecords.isEmpty()) {
-                    insert newRecords;
-                } else {
-                    //System.debug(' No valid records found.');
-                }
+            if (!newRecords.isEmpty()) {
+                insert newRecords;
             }
 
         } catch (Exception e) {
-            //System.debug(' Error processing file: ' + e.getMessage());
+            System.debug('⚠️ Error importing vulnerability data: ' + e.getMessage());
         }
     }
 
-    // CSV Parsing Function (Handles Quoted Values)
+    // CSV Parsing Utility - Handles commas inside quoted fields
     public static List<String> parseCSVLine(String csvLine) {
         List<String> columns = new List<String>();
         Boolean insideQuote = false;
