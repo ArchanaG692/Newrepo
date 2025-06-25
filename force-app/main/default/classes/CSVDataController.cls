@@ -12,7 +12,7 @@ public with sharing class CSVDataController {
         CSVDataResponse response = new CSVDataResponse();
 
         try {
-            // Step 1: Query all CSV attachments on the case
+            // Step 1: Get the most recent CSV attachment on the case
             List<Attachment> attachments = [
                 SELECT Id, Body, Name
                 FROM Attachment
@@ -37,7 +37,7 @@ public with sharing class CSVDataController {
                     lowercaseHeaders.add(h.trim().toLowerCase());
                 }
 
-                // Step 3: Parse each line
+                // Step 3: Process each row
                 for (Integer i = 1; i < lines.size(); i++) {
                     List<String> values = parseCSVLine(lines[i]);
                     if (values.size() != headers.size()) continue;
@@ -47,20 +47,18 @@ public with sharing class CSVDataController {
                         rowData.put(lowercaseHeaders[j], values[j].trim().replaceAll('^\"|\"$', ''));
                     }
 
-                    // Step 4: Count violation types using file path
+                    // Step 4: Normalize file path and count violations
                     if (rowData.containsKey('file')) {
                         String filePath = rowData.get('file').toLowerCase();
+                        String normalizedPath = filePath.replaceAll('_', '/');
 
-                        // Debug output (optional)
-                        // System.debug('📂 File path: ' + filePath);
-
-                        if (filePath.contains('/classes/')) {
+                        if (normalizedPath.contains('/classes/')) {
                             response.clsViolationCount++;
-                        } else if (filePath.contains('/lwc/')) {
+                        } else if (normalizedPath.contains('/lwc/')) {
                             response.lwcViolationCount++;
-                        } else if (filePath.contains('/aura/')) {
+                        } else if (normalizedPath.contains('/aura/')) {
                             response.auraViolationCount++;
-                        } else if (filePath.contains('/objects/')) {
+                        } else if (normalizedPath.contains('/objects/')) {
                             response.objectsViolationCount++;
                         }
                     }
@@ -68,13 +66,15 @@ public with sharing class CSVDataController {
                     response.csvData.add(rowData);
                 }
             }
+
         } catch (Exception e) {
-            System.debug('❌ Error parsing CSV: ' + e.getMessage());
+            System.debug('❌ Error parsing CSV for case: ' + e.getMessage());
         }
 
         return response;
     }
 
+    // Parses a CSV line while handling quoted commas
     private static List<String> parseCSVLine(String csvLine) {
         List<String> columns = new List<String>();
         Boolean insideQuote = false;
