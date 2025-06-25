@@ -1,60 +1,130 @@
 public with sharing class ScannerReportHandler {
-    private static Boolean isProcessing = false; // Prevent recursive execution
+    private static Boolean isProcessing = false;
+    private static final String RECORD_TYPE_DEVELOPER_NAME = 'MCSE_Code_Scan'; 
 
     @future
     public static void processFiles(Set<Id> contentDocumentIds) {
         if (isProcessing) {
-            System.debug('⚠️ Process already running. Skipping to prevent recursion.');
+            //System.debug(' Process already running. Skipping to prevent recursion.');
             return;
         }
 
-        isProcessing = true; // Set flag to prevent recursion
-
-        System.debug('🔍 Processing Scanner Report Files for ContentDocumentIds: ' + contentDocumentIds);
+        isProcessing = true;
+        
 
         if (contentDocumentIds.isEmpty()) {
-            System.debug('⚠️ No ContentDocumentIds provided. Skipping processing.');
             isProcessing = false;
             return;
         }
 
-        // Fetch ContentVersion records for processing
+        //  Fetch RecordTypeId dynamically
+        Id caseRecordTypeId;
+        try {
+            caseRecordTypeId = [
+                SELECT Id FROM RecordType 
+                WHERE SObjectType = 'Case' 
+                AND DeveloperName = :RECORD_TYPE_DEVELOPER_NAME 
+                LIMIT 1
+            ].Id;
+        } catch (Exception e) {
+            isProcessing = false;
+            return;
+        }
+
+        // Fetch ContentVersion records
         List<ContentVersion> contentVersions = [ 
-            SELECT Id, ContentDocumentId, Title 
+            SELECT Id, ContentDocumentId, Title, PathOnClient 
             FROM ContentVersion 
             WHERE ContentDocumentId IN :contentDocumentIds
         ];
 
         if (contentVersions.isEmpty()) {
-            System.debug('⚠️ No matching ContentVersion records found.');
             isProcessing = false;
             return;
         }
 
         List<Case> casesToInsert = new List<Case>();
-        Map<Id, Id> caseToFileMap = new Map<Id, Id>(); // Store Case ID -> ContentDocumentId mapping
+        Map<Id, Id> caseToFileMap = new Map<Id, Id>();
 
         for (ContentVersion cv : contentVersions) {
-            System.debug('📂 Processing File: ' + cv.Title + ' | ContentDocumentId: ' + cv.ContentDocumentId);
 
             if (cv.Title.contains('Code Scanner') || cv.Title.contains('Code Scanner Delta')) {
-                System.debug('✅ File Matches Condition: ' + cv.Title);
 
                 Case newCase = new Case();
+                newCase.RecordTypeId = caseRecordTypeId;
                 newCase.File_Name__c = cv.Title;
                 newCase.Status = 'New';
+                newCase.Origin = 'Code Scan';   
+
+                String commitAuthor = '';         
+
+                try {
+                    ContentVersion cvWithData = [
+                        SELECT VersionData 
+                        FROM ContentVersion 
+                        WHERE Id = :cv.Id 
+                        LIMIT 1
+                    ];
+                    Blob csvBlob = cvWithData.VersionData;
+                    String csvContent = csvBlob.toString();
+
+                    List<String> csvLines = csvContent.split('\n');
+                    if (csvLines.size() > 1) {
+                        String headerLine = csvLines[0];
+                        List<String> headers = headerLine.split(',');
+
+                        Integer targetBranchIndex = headers.indexOf('TargetBranch');
+                        Integer commitIndex = headers.indexOf('Commit');
+                        Integer severityIndex = headers.indexOf('Severity');
+
+                        Boolean setPriority = false;
+                        for (Integer i = 1; i < csvLines.size(); i++) {
+                            List<String> values = csvLines[i].split(',');
+
+                            if (targetBranchIndex != -1 && values.size() > targetBranchIndex) {
+                                String targetBranchValue = values[targetBranchIndex].trim();
+                                newCase.Target_Environment__c = targetBranchValue;
+                            }
+
+                            if (commitIndex != -1 && values.size() > commitIndex) {
+                                String commitValue = values[commitIndex].trim();
+                                newCase.Case_Created_By__c = commitValue;
+                                commitAuthor = commitValue;
+                            }
+							
+                            if (!setPriority && severityIndex != -1 && values.size() > severityIndex) {
+                                String severityValue = values[severityIndex].trim();
+                                if (severityValue == '1' || severityValue == '2') {
+                                    newCase.Priority = 'High';
+                                    setPriority = true;
+                                } else if (severityValue == '3') {
+                                    newCase.Priority = 'Medium';
+                                    setPriority = true;
+                                } else if (severityValue == '4' || severityValue == '5') {
+                                    newCase.Priority = 'Low';
+                                    setPriority = true;
+                                }
+                            }
+                            if (newCase.Target_Environment__c != null || newCase.Case_Created_By__c != null) {
+                                break;
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    //System.debug(' Error reading CSV content: ' + e.getMessage());
+                }
+
+                newCase.Subject = commitAuthor + ' - ' + cv.Title;  
 
                 casesToInsert.add(newCase);
-                caseToFileMap.put(cv.ContentDocumentId, null); // Placeholder
+                caseToFileMap.put(cv.ContentDocumentId, null);
             }
         }
 
         if (!casesToInsert.isEmpty()) {
             try {
                 insert casesToInsert;
-                System.debug('✅ Successfully inserted ' + casesToInsert.size() + ' Case records.');
 
-                // Map newly created Cases to their corresponding ContentDocumentId
                 Integer index = 0;
                 for (Case createdCase : casesToInsert) {
                     Id docId = contentVersions[index].ContentDocumentId;
@@ -63,26 +133,20 @@ public with sharing class ScannerReportHandler {
                 }
 
             } catch (DmlException e) {
-                System.debug('❌ Error inserting Cases: ' + e.getMessage());
                 isProcessing = false;
                 return;
             }
         } else {
-            System.debug('⚠️ No Cases to insert.');
             isProcessing = false;
             return;
         }
 
-        // ✅ Step 2: Ensure Files Are Linked to Cases
         List<ContentDocumentLink> linksToInsert = new List<ContentDocumentLink>();
 
         for (Id contentDocId : caseToFileMap.keySet()) {
             Id caseId = caseToFileMap.get(contentDocId);
 
             if (caseId != null) {
-                System.debug('🔗 Checking ContentDocumentLink for Case: ' + caseId + ' | File: ' + contentDocId);
-
-                // Ensure ContentDocumentLink does not already exist
                 List<ContentDocumentLink> existingLinks = [
                     SELECT Id FROM ContentDocumentLink 
                     WHERE LinkedEntityId = :caseId 
@@ -90,33 +154,25 @@ public with sharing class ScannerReportHandler {
                 ];
 
                 if (existingLinks.isEmpty()) {
-                    System.debug('✅ Creating ContentDocumentLink for Case: ' + caseId + ' | File: ' + contentDocId);
-
                     ContentDocumentLink link = new ContentDocumentLink();
                     link.ContentDocumentId = contentDocId;
                     link.LinkedEntityId = caseId;
-                    link.ShareType = 'V'; // Viewer access
+                    link.ShareType = 'V';
                     link.Visibility = 'AllUsers';
 
                     linksToInsert.add(link);
-                } else {
-                    System.debug('⚠️ File already linked to this Case. Skipping.');
                 }
             }
         }
 
-        // Insert ContentDocumentLinks to link files to Cases
         if (!linksToInsert.isEmpty()) {
             try {
                 insert linksToInsert;
-                System.debug('✅ Successfully linked ' + linksToInsert.size() + ' files to Case records.');
             } catch (DmlException e) {
-                System.debug('❌ Error linking files to Case: ' + e.getMessage());
+                //System.debug(' Error linking files to Case: ' + e.getMessage());
             }
-        } else {
-            System.debug('⚠️ No new files to link.');
         }
 
-        isProcessing = false; // Reset flag after execution
+        isProcessing = false;
     }
 }
