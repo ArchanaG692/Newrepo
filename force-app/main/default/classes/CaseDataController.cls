@@ -12,6 +12,8 @@ public with sharing class CaseDataController {
         CSVDataResponse response = new CSVDataResponse();
 
         try {
+            System.debug('🔍 Fetching latest CSV file from Case ID: ' + caseId);
+
             // Step 1: Get latest ContentDocumentId from Case's Files Related List
             List<ContentDocumentLink> contentLinks = [
                 SELECT ContentDocumentId 
@@ -27,6 +29,7 @@ public with sharing class CaseDataController {
             }
 
             Id contentDocumentId = contentLinks[0].ContentDocumentId;
+            System.debug('✅ Found ContentDocumentId: ' + contentDocumentId);
 
             // Step 2: Get latest ContentVersion (CSV file)
             List<ContentVersion> contentVersions = [
@@ -44,6 +47,7 @@ public with sharing class CaseDataController {
             }
 
             ContentVersion csvFile = contentVersions[0];
+            System.debug('✅ Found CSV file: ' + csvFile.Title);
 
             // Step 3: Read CSV content
             Blob csvBlob = csvFile.VersionData;
@@ -51,15 +55,17 @@ public with sharing class CaseDataController {
 
             // Step 4: Parse CSV content
             List<String> lines = csvContent.split('\n');
+
             if (lines.isEmpty()) {
                 System.debug('⚠️ CSV file is empty.');
                 return response;
             }
 
-            // Convert headers to lowercase for consistency
-            List<String> headers = lines[0].toLowerCase().split(',');
+            List<String> headers = lines[0].split(',');
 
-            // Step 5: Process each row
+            System.debug('✅ CSV Headers: ' + headers);
+
+            // Process CSV rows
             for (Integer i = 1; i < lines.size(); i++) {
                 List<String> values = lines[i].split(',');
 
@@ -69,41 +75,25 @@ public with sharing class CaseDataController {
                         rowData.put(headers[j].trim(), values[j].trim());
                     }
 
-                    // Count violations and add category
-                    String category = '';
-                    if (rowData.containsKey('file')) {
-                        String filePath = rowData.get('file').toLowerCase().trim();
-                        String normalizedPath = filePath.replaceAll('_', '/');
-
-                        System.debug('📁 Normalized path: ' + normalizedPath);
-
-                        if (normalizedPath.contains('/classes/')) {
+                    // Count violations based on file path
+                    if (rowData.containsKey('File')) {
+                        String filePath = rowData.get('File').trim();
+                        if (filePath.contains('classes')) {
                             response.clsViolationCount++;
-                            category = 'Apex Class';
-                        } else if (normalizedPath.contains('/lwc/')) {
+                        } else if (filePath.contains('lwc')) {
                             response.lwcViolationCount++;
-                            category = 'LWC';
-                        } else if (normalizedPath.contains('/aura/')) {
+                        } else if (filePath.contains('aura')) {
                             response.auraViolationCount++;
-                            category = 'Aura';
-                        } else if (normalizedPath.contains('/objects/')) {
+                        } else if (filePath.contains('objects')) {
                             response.objectsViolationCount++;
-                            category = 'Objects';
                         }
                     }
 
-                    // ✅ Inject category so LWC modal filters work
-                    rowData.put('category', category);
                     response.csvData.add(rowData);
                 }
             }
 
-            // Summary logging
-            System.debug('✅ Rows parsed: ' + response.csvData.size());
-            System.debug('✅ Apex Violations: ' + response.clsViolationCount);
-            System.debug('✅ LWC Violations: ' + response.lwcViolationCount);
-            System.debug('✅ Aura Violations: ' + response.auraViolationCount);
-            System.debug('✅ Object Violations: ' + response.objectsViolationCount);
+            System.debug('✅ Successfully processed CSV data.');
 
         } catch (Exception e) {
             System.debug('❌ Error processing CSV: ' + e.getMessage());
