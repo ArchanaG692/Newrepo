@@ -24,7 +24,6 @@ public with sharing class File {
                                              ORDER BY CreatedDate DESC];
 
             if (fileList.isEmpty()) {
-                System.debug('❌ No ContentVersion found for the given ContentDocumentIds.');
                 return;
             }
 
@@ -32,18 +31,15 @@ public with sharing class File {
 
             for (ContentVersion file : fileList) {
                 if (file.VersionData == null) {
-                    System.debug('⚠️ Skipping file with empty content: ' + file.Id);
                     continue;
                 }
 
-                System.debug('✅ Processing file: ' + file.Id);
 
                 // Convert the file content (CSV) to string
                 String csvContent = file.VersionData.toString();
                 List<String> lines = csvContent.split('\\n');
 
                 if (lines.isEmpty()) {
-                    System.debug('⚠️ Skipping empty CSV file: ' + file.Id);
                     continue;
                 }
 
@@ -55,29 +51,29 @@ public with sharing class File {
                     columnMap.put(headers[i].trim().toLowerCase(), i);
                 }
 
-                System.debug('🔍 Available columns in CSV: ' + columnMap.keySet());
 
                 // Required field mappings
                 Map<String, String> fieldMappings = new Map<String, String>{
-                    'problem' => 'problem', 
-                    'severity' => 'severity', 
-                    'file' => 'file', 
-                    'templine' => 'line', 
-                    'column' => 'column', 
+                    //'problem' => 'problem', 
+                    
                     'rule' => 'rule',
-                    'description' => 'description', 
-                    'url' => 'url', 
-                    'category' => 'category', 
-                    'engine' => 'engine', 
+                    'engine' => 'engine',
+                    'severity' => 'severity',
+                    'tags' => 'category',
+                    'file' => 'file',
+                    'startLine' => 'line',
+                    'startColumn' => 'column',
+                    'message' => 'description',
+                    'resources' => 'url',
                     'commit' => 'commit', 
                     'actualline' => 'actual line',
                     'targetbranch' => 'target branch'
+                        
                 };
 
                 // Validate all required fields exist in CSV
                 for (String field : fieldMappings.keySet()) {
                     if (!columnMap.containsKey(field)) {
-                        System.debug('❌ Missing required column: ' + field);
                         return;
                     }
                 }
@@ -87,20 +83,19 @@ public with sharing class File {
                     List<String> columns = parseCSVLine(lines[i]);
 
                     if (columns.size() < headers.size()) {
-                        System.debug('⚠️ Skipping malformed row: ' + lines[i]);
                         continue;
                     }
 
                     Vulnerability__c vuln = new Vulnerability__c();
-                    vuln.Problem__c = columns[columnMap.get('problem')].trim();
+                    //vuln.Problem__c = columns[columnMap.get('problem')].trim();
                     vuln.Severity__c = columns[columnMap.get('severity')].trim();
                     vuln.File__c = columns[columnMap.get('file')].trim();
-                    vuln.Line__c = columns[columnMap.get('templine')].trim();
-                    vuln.Column__c = columns[columnMap.get('column')].trim();
+                    vuln.Line__c = columns[columnMap.get('startline')].trim();
+                    vuln.Column__c = columns[columnMap.get('startcolumn')].trim();
                     vuln.Rule__c = columns[columnMap.get('rule')].trim();
-                    vuln.Description__c = columns[columnMap.get('description')].trim();
-                    vuln.URL__c = columns[columnMap.get('url')].trim();
-                    vuln.Category__c = columns[columnMap.get('category')].trim();
+                    vuln.Description__c = columns[columnMap.get('message')].trim();
+                    vuln.URL__c = columns[columnMap.get('resources')].trim();
+                    vuln.Category__c = columns[columnMap.get('tags')].trim();
                     vuln.Engine__c = columns[columnMap.get('engine')].trim();
                     vuln.Commit__c = columns[columnMap.get('commit')].trim();
                     vuln.ActualLine__c = columns[columnMap.get('actualline')].trim();
@@ -112,14 +107,13 @@ public with sharing class File {
                 // Insert records in bulk
                 if (!newRecords.isEmpty()) {
                     insert newRecords;
-                    System.debug(newRecords.size() + ' ✅ Vulnerability records created.');
                 } else {
-                    System.debug('⚠️ No valid records found.');
+                    //System.debug(' No valid records found.');
                 }
             }
 
         } catch (Exception e) {
-            System.debug('❌ Error processing file: ' + e.getMessage());
+            //System.debug(' Error processing file: ' + e.getMessage());
         }
     }
 
