@@ -22,7 +22,7 @@ public with sharing class CSVDataController {
             ];
 
             if (attachments.isEmpty()) {
-                System.debug('⚠️ No matching CSV files found for Case ID: ' + caseId);
+                //System.debug('️ No matching CSV files found for Case ID: ' + caseId);
                 return response;
             }
 
@@ -33,7 +33,6 @@ public with sharing class CSVDataController {
 
                 List<String> lines = csvContent.split('\n');
                 if (lines.isEmpty()) {
-                    System.debug('⚠️ Skipping empty CSV file: ' + csvFile.Name);
                     continue;
                 }
 
@@ -68,7 +67,7 @@ public with sharing class CSVDataController {
                 }
             }
         } catch (Exception e) {
-            System.debug('❌ Error processing CSV: ' + e.getMessage());
+            //System.debug('❌ Error processing CSV: ' + e.getMessage());
         }
 
         return response;
