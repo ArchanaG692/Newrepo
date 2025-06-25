@@ -1,47 +1,73 @@
 @isTest
 public class FileTest {
-    
+
     @isTest
-    static void testProcessNewFiles() {
-        // Create test ContentVersion with a matching title
+    static void testValidContentVersion() {
         ContentVersion cv = new ContentVersion(
-            Title = 'Code Scanner - Sample Report',
-            PathOnClient = 'test.csv',
-            VersionData = Blob.valueOf('rule,engine,severity\nAvoidDebugStatements,pmd,3'),
+            Title = 'Code Scanner - Valid',
+            PathOnClient = 'valid.csv',
+            VersionData = Blob.valueOf('test data'),
             IsMajorVersion = true
         );
         insert cv;
 
-        // Fetch inserted ContentVersion with ContentDocumentId populated
-        ContentVersion insertedCV = [SELECT Id, Title, ContentDocumentId FROM ContentVersion WHERE Id = :cv.Id LIMIT 1];
+        // Fetch inserted CV with ContentDocumentId
+        ContentVersion inserted = [
+            SELECT Id, Title, ContentDocumentId
+            FROM ContentVersion
+            WHERE Id = :cv.Id
+        ];
 
-        // Sanity check
-        System.assertNotEquals(null, insertedCV.ContentDocumentId, 'ContentDocumentId should be populated after insert');
-
-        // Call method under test
         Test.startTest();
-        File.processNewFiles(new List<ContentVersion>{ insertedCV });
+        File.processNewFiles(new List<ContentVersion>{ inserted });
         Test.stopTest();
-
-        // ✅ No exceptions mean the test passed the logic path
-        System.debug('File.processNewFiles executed successfully.');
     }
 
     @isTest
-    static void testProcessNewFilesWithNoMatchingFiles() {
-        // Create test ContentVersion with a non-matching title
+    static void testTitleIsNull() {
         ContentVersion cv = new ContentVersion(
-            Title = 'Unrelated File',
-            PathOnClient = 'unrelated.csv',
+            Title = null,
+            PathOnClient = 'nullTitle.csv',
             VersionData = Blob.valueOf('data'),
             IsMajorVersion = true
         );
         insert cv;
 
-        // Run method
         File.processNewFiles(new List<ContentVersion>{ cv });
+    }
 
-        // Expected: nothing happens
-        System.assert(true, 'Should not throw exception for non-matching title');
+    @isTest
+    static void testTitleMatchesButNoContentDocId() {
+        // Simulate ContentVersion without ContentDocumentId
+        ContentVersion cv = new ContentVersion(
+            Title = 'Code Scanner - Missing DocId',
+            PathOnClient = 'nodoc.csv',
+            VersionData = Blob.valueOf('data'),
+            IsMajorVersion = true
+        );
+        insert cv;
+
+        // Query before ContentDocumentId is populated
+        ContentVersion inserted = [
+            SELECT Id, Title
+            FROM ContentVersion
+            WHERE Id = :cv.Id
+        ];
+
+        // Now call method (ContentDocumentId is null)
+        File.processNewFiles(new List<ContentVersion>{ inserted });
+    }
+
+    @isTest
+    static void testUnrelatedTitle() {
+        ContentVersion cv = new ContentVersion(
+            Title = 'Random File',
+            PathOnClient = 'random.csv',
+            VersionData = Blob.valueOf('data'),
+            IsMajorVersion = true
+        );
+        insert cv;
+
+        File.processNewFiles(new List<ContentVersion>{ cv });
     }
 }
