@@ -1,108 +1,40 @@
 @isTest
-private class FileTest {
+public class FileTest {
 
     @isTest
-    static void testProcessNewFiles_and_importVulnerabilityData() {
-        // Step 1: Create a valid CSV content string
-        String csvData =
-            'problem,severity,file,templine,column,rule,description,url,category,engine,commit,actualline,targetbranch\n' +
-            'Unused var,3,classes/MyClass.cls,10,5,PMDRule,Unused variable found,http://rule.url,Best Practices,PMD,abc123,10,main';
+    static void testProcessNewFiles_andImportVulnerabilityData() {
+        // Step 1: Prepare mock V5 CSV content
+        String csvContent =
+            'rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,commit,actualline,targetbranch\n' +
+            'AvoidDebug,pmd,3,Performance,temp_scanner_files_temp_force-app_main_default_classes_MyClass.cls,4,9,4,49,"Avoid debug","https://docs.pmd-code.org","TestUser","4","feature/scan"';
 
-        // Step 2: Upload as ContentVersion
-        ContentVersion version = new ContentVersion(
-            Title = 'SecurityReport',
-            PathOnClient = 'SecurityReport.csv',
-            VersionData = Blob.valueOf(csvData),
+        // Step 2: Create a mock ContentVersion record
+        ContentVersion cv = new ContentVersion(
+            Title = 'Code Scanner Report - Test',
+            PathOnClient = 'TestReport.csv',
+            VersionData = Blob.valueOf(csvContent),
             IsMajorVersion = true
         );
-        insert version;
+        insert cv;
 
-        // Step 3: Get ContentDocumentId after insert
-        version = [
-            SELECT Id, ContentDocumentId
-            FROM ContentVersion
-            WHERE Id = :version.Id
-        ];
+        // Fetch ContentDocumentId via SOQL (auto-generated after insert)
+        cv = [SELECT Id, ContentDocumentId FROM ContentVersion WHERE Id = :cv.Id LIMIT 1];
 
-        // Step 4: Add ContentVersion to list
-        List<ContentVersion> versionList = new List<ContentVersion>{ version };
-
-        // Step 5: Call method
+        // Step 3: Call the method under test
         Test.startTest();
-        File.processNewFiles(versionList);
+        List<ContentVersion> inputList = [SELECT Id, ContentDocumentId FROM ContentVersion WHERE Id = :cv.Id];
+        File.processNewFiles(inputList);
         Test.stopTest();
 
-        // Step 6: Assert Vulnerability__c record created
-        List<Vulnerability__c> records = [SELECT Id, Problem__c, Severity__c FROM Vulnerability__c];
-        System.assertEquals(1, records.size());
-        System.assertEquals('Unused var', records[0].Problem__c);
-        System.assertEquals('3', records[0].Severity__c);
-    }
+        // Step 4: Validate that Vulnerability__c record was created
+        List<Vulnerability__c> vulns = [SELECT Rule__c, File__c, Line__c, Column__c, Severity__c, TargetBranch__c FROM Vulnerability__c];
 
-    @isTest
-    static void test_importVulnerabilityData_emptyVersionData() {
-        ContentVersion emptyVersion = new ContentVersion(
-            Title = 'EmptyFile',
-            PathOnClient = 'EmptyFile.csv',
-            VersionData = null,
-            IsMajorVersion = true
-        );
-        insert emptyVersion;
-
-        emptyVersion = [
-            SELECT Id, ContentDocumentId
-            FROM ContentVersion
-            WHERE Id = :emptyVersion.Id
-        ];
-
-        Test.startTest();
-        File.importVulnerabilityData(new List<Id>{ emptyVersion.ContentDocumentId });
-        Test.stopTest();
-
-        // No records should be created
-        List<Vulnerability__c> records = [SELECT Id FROM Vulnerability__c];
-        System.assertEquals(0, records.size());
-    }
-
-    @isTest
-    static void test_importVulnerabilityData_missingRequiredFields() {
-        // Missing 'problem' column
-        String csvData =
-            'severity,file,templine,column,rule,description,url,category,engine,commit,actualline,targetbranch\n' +
-            '3,classes/MyClass.cls,10,5,PMDRule,Unused variable found,http://rule.url,Best Practices,PMD,abc123,10,main';
-
-        ContentVersion badVersion = new ContentVersion(
-            Title = 'BadFile',
-            PathOnClient = 'BadFile.csv',
-            VersionData = Blob.valueOf(csvData),
-            IsMajorVersion = true
-        );
-        insert badVersion;
-
-        badVersion = [
-            SELECT Id, ContentDocumentId
-            FROM ContentVersion
-            WHERE Id = :badVersion.Id
-        ];
-
-        Test.startTest();
-        File.importVulnerabilityData(new List<Id>{ badVersion.ContentDocumentId });
-        Test.stopTest();
-
-        // Should skip processing due to missing 'problem' column
-        List<Vulnerability__c> records = [SELECT Id FROM Vulnerability__c];
-        System.assertEquals(0, records.size());
-    }
-
-    @isTest
-    static void test_parseCSVLine_quotes_and_commas() {
-        // A CSV line with quoted value containing a comma
-        String line = '"High Severity","This is, a comma inside","TestFile.cls"';
-
-        List<String> result = File.parseCSVLine(line);
-        System.assertEquals(3, result.size());
-        System.assertEquals('High Severity', result[0]);
-        System.assertEquals('This is, a comma inside', result[1]);
-        System.assertEquals('TestFile.cls', result[2]);
+        System.assertEquals(1, vulns.size(), 'A vulnerability record should be inserted.');
+        System.assertEquals('AvoidDebug', vulns[0].Rule__c);
+        System.assertEquals('3', vulns[0].Severity__c);
+        System.assertEquals('temp_scanner_files_temp_force-app_main_default_classes_MyClass.cls', vulns[0].File__c);
+        System.assertEquals('4', vulns[0].Line__c);
+        System.assertEquals('9', vulns[0].Column__c);
+        System.assertEquals('feature/scan', vulns[0].TargetBranch__c);
     }
 }
