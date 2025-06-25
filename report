@@ -1,8 +1,6 @@
-awk 'BEGIN{FS=OFS=","}
-     NR==1 { print; next }
-     {
-       gsub(/"/, "", $4);
-       gsub(/,/, ";", $4);
-       $4="\"" $4 "\"";
-       print
-     }' partial_scan.csv > cleaned_partial_scan.csv
+# Keep only the first tag from the ESLint tags field
+awk -F',' 'NR==1 {print; next} {
+  split($4, tags, ",");
+  $4="\""tags[1]"\"";
+  print
+}' OFS=',' partial_scan.csv > cleaned_partial.csv
