@@ -1,15 +1,13 @@
-tail -n +2 "scanner-report-partial.csv" | awk -F',' -v OFS=',' -v commit_author="${{ env.GITHUB_USERNAME }}" -v target_branch="${{ env.TARGET_BRANCH }}" '
+tail -n +2 partial_scan.csv | \
+awk -F',' -v OFS=',' -v commit_author="$GITHUB_USERNAME" -v target_branch="$TARGET_BRANCH" '
 {
-  # Normalize "tags" field (column 4) for ESLint reports: remove quotes + replace internal commas
-  gsub(/^"|"$/, "", $4);     # Remove outer quotes
-  gsub(/,/, "-", $4);        # Replace internal commas with dashes
-
+  if ($4 ~ /,/ && $4 !~ /^"/) $4 = "\"" $4 "\"";
+  while (NF < 14) { $NF = $NF ",N/A" }
   $12 = commit_author;
-  if (NF < 13) $13 = "N/A";
   $14 = target_branch;
-
   print $0
 }' >> scanner-report.csv
+
 
 rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,Commit,ActualLine,TargetBranch
 "no-unused-vars","eslint",2,"Recommended,ErrorProne,JavaScript","force-app/main/default/lwc/tmpLwcComponent/tmpLwcComponent.js",2,10,2,21,Archana-Gogeneni_cvsh,"https://eslint.org/docs/latest/rules/no-unused-vars",ESODev1
