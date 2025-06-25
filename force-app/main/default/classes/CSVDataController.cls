@@ -78,4 +78,35 @@ public with sharing class CSVDataController {
 
             // Summary log
             System.debug('✅ CSV Rows: ' + response.csvData.size());
-            System.debug('✅ Ap
+            System.debug('✅ Apex Violations: ' + response.clsViolationCount);
+            System.debug('✅ LWC Violations: ' + response.lwcViolationCount);
+            System.debug('✅ Aura Violations: ' + response.auraViolationCount);
+            System.debug('✅ Object Violations: ' + response.objectsViolationCount);
+
+        } catch (Exception e) {
+            System.debug('❌ CSV parse error: ' + e.getMessage());
+        }
+
+        return response;
+    }
+
+    private static List<String> parseCSVLine(String csvLine) {
+        List<String> columns = new List<String>();
+        Boolean insideQuote = false;
+        String currentValue = '';
+
+        for (Integer i = 0; i < csvLine.length(); i++) {
+            String currentChar = csvLine.substring(i, i + 1);
+            if (currentChar == '"') {
+                insideQuote = !insideQuote;
+            } else if (currentChar == ',' && !insideQuote) {
+                columns.add(currentValue.trim());
+                currentValue = '';
+            } else {
+                currentValue += currentChar;
+            }
+        }
+        columns.add(currentValue.trim());
+        return columns;
+    }
+}
