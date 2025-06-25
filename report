@@ -1,12 +1,5 @@
-tail -n +2 partial_scan.csv | \
-awk -F',' -v OFS=',' -v commit_author="$GITHUB_USERNAME" -v target_branch="$TARGET_BRANCH" '
-{
-  if ($4 ~ /,/ && $4 !~ /^"/) $4 = "\"" $4 "\"";
-  while (NF < 14) { $NF = $NF ",N/A" }
-  $12 = commit_author;
-  $14 = target_branch;
-  print $0
-}' >> scanner-report.csv
+# Replace internal commas in the "tags" column with semicolons
+  gsub(/,/, ";", $4)
 
 
 rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,Commit,ActualLine,TargetBranch
