@@ -1,0 +1,8 @@
+awk 'BEGIN{FS=OFS=","}
+     NR==1 { print; next }
+     {
+       gsub(/"/, "", $4);
+       gsub(/,/, ";", $4);
+       $4="\"" $4 "\"";
+       print
+     }' partial_scan.csv > cleaned_partial_scan.csv
