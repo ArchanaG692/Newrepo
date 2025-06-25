@@ -1,5 +1,4 @@
 public with sharing class CaseDataController {
-
     public class CSVDataResponse {
         @AuraEnabled public List<Map<String, String>> csvData = new List<Map<String, String>>();
         @AuraEnabled public Integer clsViolationCount = 0;
@@ -13,94 +12,96 @@ public with sharing class CaseDataController {
         CSVDataResponse response = new CSVDataResponse();
 
         try {
-            // Step 1: Get the latest CSV attachment for the case
-            List<Attachment> attachments = [
-                SELECT Id, Body, Name
-                FROM Attachment
-                WHERE ParentId = :caseId
-                AND Name LIKE '%.csv'
-                ORDER BY CreatedDate DESC
+            // Step 1: Get latest ContentDocumentId from Case's Files Related List
+            List<ContentDocumentLink> contentLinks = [
+                SELECT ContentDocumentId 
+                FROM ContentDocumentLink 
+                WHERE LinkedEntityId = :caseId
+                ORDER BY ContentDocumentId DESC
+                LIMIT 1
             ];
 
-            if (attachments.isEmpty()) return response;
+            if (contentLinks.isEmpty()) {
+                System.debug('⚠️ No files found in Case Related List.');
+                return response;
+            }
 
-            for (Attachment csvFile : attachments) {
-                Blob csvBlob = csvFile.Body;
-                String csvContent = csvBlob.toString();
+            Id contentDocumentId = contentLinks[0].ContentDocumentId;
 
-                List<String> lines = csvContent.split('\n');
-                if (lines.isEmpty()) continue;
+            // Step 2: Get latest ContentVersion (CSV file)
+            List<ContentVersion> contentVersions = [
+                SELECT Id, VersionData, Title 
+                FROM ContentVersion
+                WHERE ContentDocumentId = :contentDocumentId
+                AND FileType = 'CSV'
+                ORDER BY CreatedDate DESC 
+                LIMIT 1
+            ];
 
-                // Step 2: Parse headers
-                List<String> headers = parseCSVLine(lines[0]);
-                List<String> lowercaseHeaders = new List<String>();
-                for (String h : headers) {
-                    lowercaseHeaders.add(h.trim().toLowerCase());
-                }
+            if (contentVersions.isEmpty()) {
+                System.debug('⚠️ No CSV file found.');
+                return response;
+            }
 
-                // Step 3: Parse data rows
-                for (Integer i = 1; i < lines.size(); i++) {
-                    List<String> values = parseCSVLine(lines[i]);
-                    if (values.size() != headers.size()) continue;
+            ContentVersion csvFile = contentVersions[0];
 
+            // Step 3: Read CSV content
+            Blob csvBlob = csvFile.VersionData;
+            String csvContent = csvBlob.toString();
+
+            // Step 4: Parse CSV content
+            List<String> lines = csvContent.split('\n');
+            if (lines.isEmpty()) {
+                System.debug('⚠️ CSV file is empty.');
+                return response;
+            }
+
+            // Convert headers to lowercase for consistency
+            List<String> headers = lines[0].toLowerCase().split(',');
+
+            // Process each row
+            for (Integer i = 1; i < lines.size(); i++) {
+                List<String> values = lines[i].split(',');
+
+                if (values.size() == headers.size()) {
                     Map<String, String> rowData = new Map<String, String>();
                     for (Integer j = 0; j < headers.size(); j++) {
-                        rowData.put(lowercaseHeaders[j], values[j].trim().replaceAll('^\"|\"$', ''));
+                        rowData.put(headers[j].trim(), values[j].trim());
                     }
 
-                    // Step 4: Determine category and count violations
-                    String category = '';
+                    // Count violations based on normalized file path
                     if (rowData.containsKey('file')) {
-                        String filePath = rowData.get('file').toLowerCase();
+                        String filePath = rowData.get('file').toLowerCase().trim();
                         String normalizedPath = filePath.replaceAll('_', '/');
+
+                        System.debug('📁 Normalized path: ' + normalizedPath);
 
                         if (normalizedPath.contains('/classes/')) {
                             response.clsViolationCount++;
-                            category = 'Apex Class';
                         } else if (normalizedPath.contains('/lwc/')) {
                             response.lwcViolationCount++;
-                            category = 'LWC';
                         } else if (normalizedPath.contains('/aura/')) {
                             response.auraViolationCount++;
-                            category = 'Aura';
                         } else if (normalizedPath.contains('/objects/')) {
                             response.objectsViolationCount++;
-                            category = 'Objects';
                         }
                     }
 
-                    // Step 5: Add category to row and collect
-                    rowData.put('category', category);
                     response.csvData.add(rowData);
                 }
             }
 
+            // Summary logging
+            System.debug('✅ Rows parsed: ' + response.csvData.size());
+            System.debug('✅ Apex Violations: ' + response.clsViolationCount);
+            System.debug('✅ LWC Violations: ' + response.lwcViolationCount);
+            System.debug('✅ Aura Violations: ' + response.auraViolationCount);
+            System.debug('✅ Object Violations: ' + response.objectsViolationCount);
+
         } catch (Exception e) {
-            System.debug('❌ Error in getCSVData: ' + e.getMessage());
+            System.debug('❌ Error processing CSV: ' + e.getMessage());
         }
 
         return response;
-    }
-
-    // Parses a single CSV line with support for quoted commas
-    private static List<String> parseCSVLine(String csvLine) {
-        List<String> columns = new List<String>();
-        Boolean insideQuote = false;
-        String currentValue = '';
-
-        for (Integer i = 0; i < csvLine.length(); i++) {
-            String currentChar = csvLine.substring(i, i + 1);
-            if (currentChar == '"') {
-                insideQuote = !insideQuote;
-            } else if (currentChar == ',' && !insideQuote) {
-                columns.add(currentValue.trim());
-                currentValue = '';
-            } else {
-                currentValue += currentChar;
-            }
-        }
-
-        columns.add(currentValue.trim());
-        return columns;
     }
 }
