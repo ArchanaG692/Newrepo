@@ -107,4 +107,32 @@ public class FileTest {
             Title = 'Empty',
             PathOnClient = 'empty.csv',
             VersionData = Blob.valueOf(' '),
-            IsMajor
+            IsMajorVersion = true
+        );
+        insert ev;
+        ev = [SELECT ContentDocumentId FROM ContentVersion WHERE Id = :ev.Id];
+
+        Test.startTest();
+        File.importVulnerabilityData(new List<Id>{ev.ContentDocumentId});
+        Test.stopTest();
+
+        System.assertEquals(0, [SELECT Count() FROM Vulnerability__c]);
+    }
+
+    @isTest
+    static void test_processWithNonScannerTitle_doesNothing() {
+        ContentVersion cv = new ContentVersion(
+            Title = 'Random File',
+            PathOnClient = 'random.csv',
+            VersionData = Blob.valueOf('a,b,c'),
+            IsMajorVersion = true
+        );
+        insert cv;
+
+        Test.startTest();
+        File.processNewFiles(new List<ContentVersion>{cv});
+        Test.stopTest();
+
+        System.assertEquals(0, [SELECT Count() FROM Vulnerability__c]);
+    }
+}
