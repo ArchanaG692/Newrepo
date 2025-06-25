@@ -1,6 +1,10 @@
-# Keep only the first tag from the ESLint tags field
-awk -F',' 'NR==1 {print; next} {
-  split($4, tags, ",");
-  $4="\""tags[1]"\"";
-  print
-}' OFS=',' partial_scan.csv > cleaned_partial.csv
+tail -n +2 partial_scan.csv | \
+awk -F',' -v OFS=',' -v commit_author="$GITHUB_USERNAME" -v target_branch="$TARGET_BRANCH" '
+{
+  # Fix embedded commas in tags field (field 4)
+  gsub(/,/, "-", $4);       # Replace comma with dash in tags
+  while (NF<14) { $NF = $NF ",N/A" }; 
+  $12=commit_author; 
+  $14=target_branch; 
+  print $0
+}' >> scanner-report.csv
