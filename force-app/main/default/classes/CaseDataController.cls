@@ -59,7 +59,7 @@ public with sharing class CaseDataController {
             // Convert headers to lowercase for consistency
             List<String> headers = lines[0].toLowerCase().split(',');
 
-            // Process each row
+            // Step 5: Process each row
             for (Integer i = 1; i < lines.size(); i++) {
                 List<String> values = lines[i].split(',');
 
@@ -69,7 +69,8 @@ public with sharing class CaseDataController {
                         rowData.put(headers[j].trim(), values[j].trim());
                     }
 
-                    // Count violations based on normalized file path
+                    // Count violations and add category
+                    String category = '';
                     if (rowData.containsKey('file')) {
                         String filePath = rowData.get('file').toLowerCase().trim();
                         String normalizedPath = filePath.replaceAll('_', '/');
@@ -78,15 +79,21 @@ public with sharing class CaseDataController {
 
                         if (normalizedPath.contains('/classes/')) {
                             response.clsViolationCount++;
+                            category = 'Apex Class';
                         } else if (normalizedPath.contains('/lwc/')) {
                             response.lwcViolationCount++;
+                            category = 'LWC';
                         } else if (normalizedPath.contains('/aura/')) {
                             response.auraViolationCount++;
+                            category = 'Aura';
                         } else if (normalizedPath.contains('/objects/')) {
                             response.objectsViolationCount++;
+                            category = 'Objects';
                         }
                     }
 
+                    // ✅ Inject category so LWC modal filters work
+                    rowData.put('category', category);
                     response.csvData.add(rowData);
                 }
             }
