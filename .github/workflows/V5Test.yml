@@ -40,6 +40,11 @@ jobs:
       - name: Confirm Installed Plugins
         run: sf plugins
 
+      - name: Install ESLint dependencies for LWC
+        run: |
+          npm init -y
+          npm install --save-dev eslint @salesforce/eslint-config-lwc @babel/eslint-parser
+
       - name: Detect changed .js files and copy to temp workspace
         run: |
           mkdir -p eslint-temp
