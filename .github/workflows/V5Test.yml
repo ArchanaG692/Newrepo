@@ -138,19 +138,19 @@ jobs:
             git push --set-upstream origin $BRANCH_NAME
           fi
 
+          # 🩹 Stash any uncommitted changes (like package.json from npm init)
+          git stash push -m "temp-stash-before-pull"
+
           # 🔄 Pull latest changes
           git pull origin $BRANCH_NAME --rebase
 
           # 📁 Restore scanner report to Artifact folder
           mkdir -p Artifact
           cp /tmp/artifact_backup/${{ env.REPORT_FILE }} Artifact/${{ env.REPORT_FILE }}
-          echo "✅ Scanner report restored to Artifact/${{ env.REPORT_FILE }}."
 
           # ✅ Commit and push
           git add Artifact/${{ env.REPORT_FILE }}
           git commit -m "🔄 Auto-update scanner report (${REPORT_FILE}) in Artifact folder for branch $BRANCH_NAME" || echo "🟡 No changes to commit"
           git push origin $BRANCH_NAME
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
 
 
