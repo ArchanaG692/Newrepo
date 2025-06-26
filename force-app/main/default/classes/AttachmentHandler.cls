@@ -1,3 +1,16 @@
+/**
+* @File Name : AttachmentHandler.cls
+* @Description :
+* @Author :
+* @Last Modified By :
+* @Last Modified On : March 7, 2025
+* @Modification Log :
+*==============================================================================
+* Ver | Date | Author | Modification
+*==============================================================================
+* 1.0 | March 7, 2025 |   | Initial Version
+**/
+
 public with sharing class AttachmentHandler {
     @AuraEnabled
     public static void createAttachmentForCase(String caseId) {
@@ -11,9 +24,8 @@ public with sharing class AttachmentHandler {
             ];
 
             if (caseRecord.File_Id__c == null) {
-                System.debug('⚠️ No file associated with this case.');
+                //System.debug(' No file associated with this case.');
                 return;
-                
             }
 
             // Retrieve the CSV file from ContentVersion
@@ -26,7 +38,7 @@ public with sharing class AttachmentHandler {
             ];
 
             if (fileVersions.isEmpty()) {
-                System.debug('⚠️ File not found for ContentDocumentId: ' + caseRecord.File_Id__c);
+                //System.debug(' File not found for ContentDocumentId: ' + caseRecord.File_Id__c);
                 return;
             }
 
@@ -34,7 +46,7 @@ public with sharing class AttachmentHandler {
 
             // Ensure the file is a CSV before creating an attachment
             if (fileVersion.FileExtension != 'csv') {
-                System.debug('⚠️ Skipping non-CSV file: ' + fileVersion.Title);
+                //System.debug('Skipping non-CSV file: ' + fileVersion.Title);
                 return;
             }
 
@@ -56,10 +68,9 @@ public with sharing class AttachmentHandler {
 
             insert attachment;
 
-            System.debug('✅ CSV Attachment successfully created for Case ID: ' + caseId);
 
         } catch (Exception e) {
-            System.debug('❌ Error creating CSV attachment: ' + e.getMessage());
+            //System.debug(' Error creating CSV attachment: ' + e.getMessage());
         }
     }
 }

@@ -1,0 +1,6 @@
+# Replace internal commas in the "tags" column with semicolons
+  gsub(/,/, ";", $4)
+
+
+rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,Commit,ActualLine,TargetBranch
+"no-unused-vars","eslint",2,"Recommended,ErrorProne,JavaScript","force-app/main/default/lwc/tmpLwcComponent/tmpLwcComponent.js",2,10,2,21,Archana-Gogeneni_cvsh,"https://eslint.org/docs/latest/rules/no-unused-vars",ESODev1
