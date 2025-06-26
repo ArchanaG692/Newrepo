@@ -112,7 +112,7 @@ jobs:
           cp scanner-report.csv /tmp/artifact_backup/${{ env.REPORT_FILE }}
           echo "✅ Scanner report backed up in /tmp/artifact_backup/${{ env.REPORT_FILE }}."
 
-      - name: Commit and Push Scanner Report to `Scanner_Reports` Branch
+      - name: Commit and Push Scanner Report to `scanner-reports` Branch
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
@@ -121,26 +121,36 @@ jobs:
           BRANCH_NAME="scanner-reports"
           echo "✅ Target Branch: $BRANCH_NAME"
 
-          # 🔹 Check if the `scanner-reports` branch exists remotely
+          # 🔁 Move report to temp to avoid Git checkout conflict
+          if [ -f scanner-report.csv ]; then
+            mv scanner-report.csv /tmp/scanner-report.csv.backup
+            echo "🔁 Moved scanner-report.csv to /tmp to avoid checkout conflict."
+          fi
+
+          # 🔎 Check if branch exists remotely
           if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
             echo "✅ Remote branch $BRANCH_NAME exists."
             git fetch origin $BRANCH_NAME:$BRANCH_NAME
-            git switch $BRANCH_NAME
+            git checkout $BRANCH_NAME
           else
             echo "❌ Remote branch $BRANCH_NAME does not exist! Creating it now..."
             git checkout -b $BRANCH_NAME
             git push --set-upstream origin $BRANCH_NAME
           fi
 
-
+          # 🔄 Pull latest changes
           git pull origin $BRANCH_NAME --rebase
+
+          # 📁 Restore scanner report to Artifact folder
           mkdir -p Artifact
           cp /tmp/artifact_backup/${{ env.REPORT_FILE }} Artifact/${{ env.REPORT_FILE }}
           echo "✅ Scanner report restored to Artifact/${{ env.REPORT_FILE }}."
 
+          # ✅ Commit and push
           git add Artifact/${{ env.REPORT_FILE }}
-          git commit -m "🔄 Auto-update scanner report (${REPORT_FILE}) in Artifact folder for branch $BRANCH_NAME" || echo "No changes to commit"
+          git commit -m "🔄 Auto-update scanner report (${REPORT_FILE}) in Artifact folder for branch $BRANCH_NAME" || echo "🟡 No changes to commit"
           git push origin $BRANCH_NAME
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
+
 
