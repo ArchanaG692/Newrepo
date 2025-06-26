@@ -15,6 +15,9 @@ engines:
       apex: [".cls", ".trigger"]
   eslint:
     auto_discover_eslint_config: true
+    disable_javascript_base_config: true
+    disable_lwc_base_config: true
+    disable_typescript_base_config: true
     file_extensions:
       javascript: [".js"]
   retire-js:
