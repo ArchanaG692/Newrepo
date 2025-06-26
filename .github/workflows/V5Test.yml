@@ -34,7 +34,7 @@ jobs:
           sf plugins uninstall @salesforce/sfdx-scanner || true
           sf plugins uninstall @salesforce/plugin-code-analyzer || true
 
-      - name: Install Code Analyzer Plugin v5.0.0
+      - name: Install Code Analyzer Plugin v5.2.1
         run: sf plugins install @salesforce/plugin-code-analyzer@5.1.0
 
       - name: Confirm Installed Plugins
