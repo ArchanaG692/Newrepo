@@ -56,9 +56,8 @@ jobs:
       - name: Run Salesforce Code Analyzer - Output JSON
         run: |
           sf code-analyzer run \
-            --workspace "force-app" \
+            --workspace "$file" \
             --config-file code-analyzer.yml \
-            --format csv \
             --output-file scanner-report.csv
 
 

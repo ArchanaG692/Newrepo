@@ -12,11 +12,11 @@
 engines:
   pmd:
     file_extensions:
-      apex: [".cls",".trigger"]
+      apex: [".cls", ".trigger"]
   eslint:
-    auto_discover_eslint_config : true
-    file_extensions: 
-      javascript : [".js"] 
+    auto_discover_eslint_config: true
+    file_extensions:
+      javascript: [".js"]
   retire-js:
     disable_engine: true
   regex:
@@ -33,18 +33,6 @@ rules:
     AvoidDebugStatements:
       severity: Info
       tags: ["Performance"]
-
     ApexCRUDViolation:
       severity: Info
       tags: ["Security"]
-
-
-
-
-
-
-
-
-
-
-
