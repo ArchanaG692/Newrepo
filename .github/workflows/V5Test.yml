@@ -57,6 +57,7 @@ jobs:
         run: |
           sf code-analyzer run \
             --workspace "$file" \
+            --engine pmd,eslint \
             --output-file scanner-report.csv \
             --config-file code-analyzer.yml
 
