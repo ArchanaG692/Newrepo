@@ -14,6 +14,7 @@ engines:
     file_extensions:
       apex: [".cls",".trigger"]
   eslint:
+    auto_discover_eslint_config : true
     file_extensions: 
       javascript : [".js"] 
   retire-js:
@@ -36,10 +37,6 @@ rules:
     ApexCRUDViolation:
       severity: Info
       tags: ["Security"]
-
-  eslint:
-    recommended:
-      severity: High
 
 
 
