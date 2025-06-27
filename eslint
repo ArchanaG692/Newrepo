@@ -1,21 +1,20 @@
-if [ -f "scanner-report-partial.csv" ] && [ -s "scanner-report-partial.csv" ]; then
-  tail -n +2 scanner-report-partial.csv | while read -r line; do
-    # Collapse quoted "tags" field to one token
-    fixed_line=$(echo "$line" | sed -E 's/"([^"]*),([^"]*)"/\1|\2/g') # Replace commas inside quotes with pipe
+tail -n +2 scanner-report-partial.csv | while IFS= read -r line; do
+  # Replace all commas inside double quotes with pipes
+  fixed_line=$(echo "$line" | perl -pe 's/"([^"]*)"/do { my $s = $1; $s =~ s/,/|/g; "\"$s\"" }/ge')
 
-    # Now use awk to split on comma
-    echo "$fixed_line" | awk -F',' -v OFS=',' -v commit="${GITHUB_USERNAME}" -v branch="${TARGET_BRANCH}" '
-      {
-        # Replace pipe back to comma inside tags
-        gsub(/\|/, ",", $4)
-        # Force fixed number of columns (if NF < 14, fill with N/A)
-        while (NF < 14) {
-          $(NF+1)="N/A"
-        }
-        $(12)=commit
-        $(13)="N/A"
-        $(14)=branch
-        print
-      }' >> scanner-report.csv
-  done
-fi
+  echo "$fixed_line" | awk -F',' -v OFS=',' \
+    -v commit="${GITHUB_USERNAME}" \
+    -v branch="${TARGET_BRANCH}" '
+    {
+      # Replace pipe back to comma in $4 (tags)
+      gsub(/\|/, ",", $4)
+      while (NF < 14) {
+        $(NF+1)="N/A"
+      }
+      $(12)=commit
+      $(13)="N/A"
+      $(14)=branch
+      print
+    }
+  '
+done >> scanner-report.csv
