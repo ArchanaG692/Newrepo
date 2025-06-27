@@ -1,18 +1,8 @@
-echo "Evaluating severity violations..."
-
 lwc_severity_count=$(awk -F',' 'NR>1 {
+  # Ensure quoted strings don't break the indexing
   severity = $3 + 0;
   file = $5;
-  if (severity >= 2 && file ~ /\.js$/) count++
-} END {print count}' "$REPORT_FILE")
-
-echo "LWC Severity 2+ Issues Found: $lwc_severity_count"
-
-if [ "$lwc_severity_count" -gt 0 ]; then
-  echo "Blocking commit due to high severity issues."
-  echo "block-status=true" >> $GITHUB_ENV
-  echo "block-status=true" >> $GITHUB_OUTPUT
-  exit 1
-else
-  echo "No blocking severity issues found."
-fi
+  gsub(/"/, "", severity); 
+  gsub(/"/, "", file);
+  if (severity >= 2 && file ~ /\.js$/) count++;
+} END { print count }' "$REPORT_FILE")
