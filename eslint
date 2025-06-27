@@ -45,3 +45,29 @@ export default [
     }
   }
 ];
+===========================================
+export default [
+  {
+    files: ['**/force-app/**/*.js'], // Narrow the path to your actual file structure
+    languageOptions: {
+      ecmaVersion: 2021,
+      sourceType: 'module',
+      globals: {
+        window: 'readonly',
+        document: 'readonly',
+        console: 'readonly'
+      }
+    },
+    rules: {
+      'no-unused-vars': ['error', { vars: 'all', args: 'after-used' }],
+      'no-console': 'error',
+      'no-debugger': 'error',
+      'eqeqeq': 'error',
+      'curly': 'error',
+      'semi': ['error', 'always'],
+      'quotes': ['error', 'single'],
+      'indent': ['error', 2]
+    }
+  }
+];
+
