@@ -1,18 +1,19 @@
 tail -n +2 scanner-report-partial.csv | while IFS= read -r line; do
+  # Replace commas ONLY inside the 4th quoted field
   fixed_line=$(echo "$line" | perl -pe '
-    # Replace commas *only inside quotes that contain multiple commas*
-    s/"((?:[^"]*,){1,}[^"]*)"/do {
+    my $count = 0;
+    s/"([^"]*)"/++$count == 4 ? do {
       my $s = $1;
       $s =~ s/,/|/g;
       "\"$s\""
-    }/ge
+    } : "\"$1\""/ge;
   ')
 
   echo "$fixed_line" | awk -F',' -v OFS=',' \
     -v commit="${GITHUB_USERNAME}" \
     -v branch="${TARGET_BRANCH}" '
     {
-      gsub(/\|/, ",", $4);  # restore for tags only
+      gsub(/\|/, ",", $4);  # Restore commas in tags
       while (NF < 14) {
         $(NF+1)="N/A"
       }
