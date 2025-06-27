@@ -1,1 +1,4 @@
-fixed_line=$(echo "$line" | perl -pe 'my $q=0; s/"([^"]*)"/++$q == 4 ? "\"${\($1 =~ s/,/|/gr)}\"" : "\"$1\""/ge')
+fixed_line=$(echo "$line" | perl -pe '
+  my $count = 0;
+  s/"([^"]*)"/++$count == 4 ? "\"" . ($1 =~ s/,/|/gr) . "\"" : "\"$1\""/ge;
+')
