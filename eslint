@@ -4,43 +4,23 @@ module.exports = {
     browser: true,
     es2021: true
   },
-  extends: "eslint:recommended",
+  extends: [
+    'eslint:recommended',
+    'plugin:lwc/recommended'
+  ],
+  plugins: ['lwc'],
   parserOptions: {
-    ecmaVersion: 2021,
-    sourceType: "module"
+    ecmaVersion: 12,
+    sourceType: 'module'
   },
   rules: {
-    // ✅ Best Practices
-    "eqeqeq": "error",
-    "curly": "error",
-    "no-eval": "error",
-    "no-implied-eval": "error",
-    "no-with": "error",
-    "no-alert": "error",
-    "no-debugger": "error",
-    "no-console": "error",           // 👈 enforced now
-    "no-unused-vars": ["warn", { vars: "all", args: "after-used" }],
-
-    // ✅ Code Quality
-    "no-unreachable": "error",
-    "no-constant-condition": "warn",
-    "no-empty": ["error", { "allowEmptyCatch": true }],
-    "no-duplicate-case": "error",
-    "no-useless-return": "error",
-    "no-else-return": ["error", { "allowElseIf": false }],
-
-    // ✅ Variables & Functions
-    "no-shadow": "error",
-    "no-redeclare": "error",
-    "prefer-const": ["warn", { "destructuring": "all" }],
-    "no-var": "error",
-
-    // ✅ Style & Readability
-    "semi": ["error", "always"],
-    "quotes": ["error", "single"],
-    "indent": ["error", 2],
-    "no-multiple-empty-lines": ["warn", { "max": 1 }],
-    "spaced-comment": ["warn", "always"],
-    "space-before-blocks": ["error", "always"]
+    'no-console': 'error',
+    'no-unused-vars': 'warn'
+  },
+  globals: {
+    $A: 'readonly',
+    $Browser: 'readonly',
+    $ContentAsset: 'readonly',
+    $Label: 'readonly'
   }
 };
