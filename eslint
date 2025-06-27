@@ -1,15 +1,18 @@
-elif [[ "$file" == *.js ]]; then
-  echo "import { LightningElement } from 'lwc';" > "$temp_file"
-  echo "export default class DummyComponent extends LightningElement {" >> "$temp_file"
-  echo "  connectedCallback() {" >> "$temp_file"
+echo "Evaluating severity violations..."
 
-  while IFS= read -r line_content; do  # not CSV, so no `IFS=,`
-    line_content_trimmed=$(echo "$line_content" | sed 's/^[ \t]*//;s/[ \t]*$//')
-    if [[ -n "$line_content_trimmed" ]]; then
-      echo "    $line_content_trimmed" >> "$temp_file"
-    fi
-  done < "line_number_mapping_${file//\//_}.txt"
+lwc_severity_count=$(awk -F',' 'NR>1 {
+  severity = $3 + 0;
+  file = $5;
+  if (severity >= 2 && file ~ /\.js$/) count++
+} END {print count}' "$REPORT_FILE")
 
-  echo "  }" >> "$temp_file"
-  echo "}" >> "$temp_file"
-  cp eslint.config.js temp_scanner_files/
+echo "LWC Severity 2+ Issues Found: $lwc_severity_count"
+
+if [ "$lwc_severity_count" -gt 0 ]; then
+  echo "Blocking commit due to high severity issues."
+  echo "block-status=true" >> $GITHUB_ENV
+  echo "block-status=true" >> $GITHUB_OUTPUT
+  exit 1
+else
+  echo "No blocking severity issues found."
+fi
