@@ -1,8 +1,41 @@
-lwc_severity_count=$(awk -F',' 'NR>1 {
-  # Ensure quoted strings don't break the indexing
-  severity = $3 + 0;
-  file = $5;
-  gsub(/"/, "", severity); 
-  gsub(/"/, "", file);
-  if (severity >= 2 && file ~ /\.js$/) count++;
-} END { print count }' "$REPORT_FILE")
+- name: Block PR merge if severity violations are found
+  run: |
+    REPORT_FILE="$GITHUB_WORKSPACE/scanner-report.csv"
+
+    echo "Reading $REPORT_FILE for severity violations..."
+
+    # Count Apex severity ≥ 3 (usually from PMD)
+    apex_severity_count=$(awk -F',' '
+      NR > 1 {
+        gsub(/"/, "", $3);        # remove quotes from severity
+        gsub(/"/, "", $5);        # remove quotes from file
+        if ($3 >= 3 && $5 ~ /\.cls$/) count++
+      }
+      END { print count + 0 }
+    ' "$REPORT_FILE")
+
+    echo "Apex Severity ≥ 3 Issues: $apex_severity_count"
+
+    # Count LWC (js/html) severity ≥ 2 (from ESLint)
+    lwc_severity_count=$(awk -F',' '
+      NR > 1 {
+        gsub(/"/, "", $3);        # severity
+        gsub(/"/, "", $5);        # file
+        if ($3 >= 2 && ($5 ~ /\.js$/ || $5 ~ /\.html$/ || $5 ~ /\.lwc$/)) count++
+      }
+      END { print count + 0 }
+    ' "$REPORT_FILE")
+
+    echo "LWC Severity ≥ 2 Issues: $lwc_severity_count"
+
+    # Block the commit if either condition is met
+    if [ "$apex_severity_count" -gt 0 ] || [ "$lwc_severity_count" -gt 0 ]; then
+      echo "❌ Blocking commit due to severity violations."
+      echo "block-status=true" >> $GITHUB_ENV
+      echo "block-status=true" >> $GITHUB_OUTPUT
+      exit 1
+    else
+      echo "✅ No blocking severity violations. Proceeding."
+      echo "block-status=false" >> $GITHUB_ENV
+      echo "block-status=false" >> $GITHUB_OUTPUT
+    fi
