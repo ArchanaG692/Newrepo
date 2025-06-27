@@ -1,25 +1,12 @@
-export default [
-  {
-    files: ['**/*.js'],
-    languageOptions: {
-      ecmaVersion: 2021,
-      sourceType: 'module',
-      globals: {
-        window: 'readonly',
-        document: 'readonly',
-        console: 'readonly'
-      }
-    },
-    rules: {
-      'no-unused-vars': ['error', { vars: 'all', args: 'after-used' }],
-      'no-console': 'error',
-      'no-debugger': 'error',
-      'eqeqeq': 'error',
-      'curly': 'error',
-      'semi': ['error', 'always'],
-      'quotes': ['error', 'single'],
-      'indent': ['error', 2],
-      'no-alert': 'error'
-    }
-  }
-];
+echo "import { LightningElement } from 'lwc';" > "$temp_file"
+echo "export default class DummyComponent extends LightningElement {" >> "$temp_file"
+echo "connectedCallback() {" >> "$temp_file"
+
+while IFS=, read -r line_number line_content; do
+  line_content_trimmed=$(echo "$line_content" | sed 's/^[ \t]*//;s/[ \t]*$//')
+  if [[ -n "$line_content_trimmed" ]]; then
+    echo "  $line_content_trimmed" >> "$temp_file"
+  fi
+done < "line_number_mapping_${file//\//_}.txt"
+
+echo "}}" >> "$temp_file"
