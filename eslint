@@ -20,3 +20,28 @@ module.exports = {
     'indent': ['error', 2]
   },
 };
+==========================================
+export default [
+  {
+    files: ['**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2021,
+      sourceType: 'module',
+      globals: {
+        window: 'readonly',
+        document: 'readonly',
+        console: 'readonly'
+      }
+    },
+    rules: {
+      'no-unused-vars': ['error', { vars: 'all', args: 'after-used' }],
+      'no-console': 'error',
+      'no-debugger': 'error',
+      'eqeqeq': 'error',
+      'curly': 'error',
+      'semi': ['error', 'always'],
+      'quotes': ['error', 'single'],
+      'indent': ['error', 2]
+    }
+  }
+];
