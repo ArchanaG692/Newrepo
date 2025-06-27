@@ -1,19 +1,23 @@
-tail -n +2 scanner-report-partial.csv | while IFS= read -r line; do
-  fixed_line=$(echo "$line" | awk '
+if [ -f "scanner-report-partial.csv" ] && [ -s "scanner-report-partial.csv" ]; then
+  tail -n +2 scanner-report-partial.csv | awk '
     BEGIN { FPAT = "([^,]*)|(\"[^\"]+\")" }
     {
-      for (i = 1; i <= NF; i++) {
-        if (i == 4) {
-          gsub(",", "|", $i);  # Replace commas inside the 4th column (tags) with |
-        }
-        printf "%s", $i
-        if (i < NF) {
-          printf ","
-        } else {
-          printf "\n"
-        }
+      # Replace commas inside only the 4th field (tags)
+      if ($4 ~ /^\".*\"$/) {
+        gsub(",", "|", $4)
       }
+      # Fill in commit/line/branch if not present
+      while (NF < 14) { $(NF+1)="\"N/A\"" }
+      $(12) = "\"" ENVIRON["GITHUB_USERNAME"] "\""
+      $(13) = "\"N/A\""
+      $(14) = "\"" ENVIRON["TARGET_BRANCH"] "\""
+
+      # Print entire line
+      out = $1
+      for (i = 2; i <= NF; i++) {
+        out = out "," $i
+      }
+      print out
     }
-  ')
-  echo "$fixed_line"
-done >> scanner-report.csv
+  ' >> scanner-report.csv
+fi
