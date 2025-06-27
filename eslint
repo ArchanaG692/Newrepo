@@ -1,26 +1,30 @@
-tail -n +2 scanner-report-partial.csv | while IFS= read -r line; do
-  # Replace commas ONLY inside the 4th quoted field
-  fixed_line=$(echo "$line" | perl -pe '
-    my $count = 0;
-    s/"([^"]*)"/++$count == 4 ? do {
-      my $s = $1;
-      $s =~ s/,/|/g;
-      "\"$s\""
-    } : "\"$1\""/ge;
-  ')
+if [ -f "scanner-report-partial.csv" ] && [ -s "scanner-report-partial.csv" ]; then
+  tail -n +2 scanner-report-partial.csv | while IFS= read -r line; do
+    fixed_line=$(perl <<'EOF'
+      my $line = <>; 
+      my $quote_count = 0;
+      $line =~ s/"([^"]*)"/++$quote_count == 4 ? do {
+        my $s = $1;
+        $s =~ s/,/|/g;
+        "\"$s\""
+      } : "\"$1\""/ge;
+      print $line;
+EOF
+    <<< "$line")
 
-  echo "$fixed_line" | awk -F',' -v OFS=',' \
-    -v commit="${GITHUB_USERNAME}" \
-    -v branch="${TARGET_BRANCH}" '
-    {
-      gsub(/\|/, ",", $4);  # Restore commas in tags
-      while (NF < 14) {
-        $(NF+1)="N/A"
+    echo "$fixed_line" | awk -F',' -v OFS=',' \
+      -v commit="${GITHUB_USERNAME}" \
+      -v branch="${TARGET_BRANCH}" '
+      {
+        gsub(/\|/, ",", $4);  # Restore commas in tags
+        while (NF < 14) {
+          $(NF+1)="N/A"
+        }
+        $(12)=commit
+        $(13)="N/A"
+        $(14)=branch
+        print
       }
-      $(12)=commit
-      $(13)="N/A"
-      $(14)=branch
-      print
-    }
-  '
-done >> scanner-report.csv
+    '
+  done >> scanner-report.csv
+fi
