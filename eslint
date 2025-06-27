@@ -1,16 +1,24 @@
-tail -n +2 "scanner-report-partial.csv" | \
-sed -E ':a; s/("([^"]*,[^"]*)+),/\1|/g; ta' | \
-awk -F',' -v OFS=',' \
-    -v commit_author="${{ env.GITHUB_USERNAME }}" \
-    -v target_branch="${{ env.TARGET_BRANCH }}" \
-    -v unwanted_path="$UNWANTED_PATH" '{
-  # Fix back the tags column (4th one)
-  gsub(/\|/, ",", $4);
+tail -n +2 scanner-report-partial.csv | while IFS= read -r line; do
+  tag_field=$(echo "$line" | awk -F',' '{
+    tag = $4;
+    for(i=5;i<=NF;i++) {
+      tag = tag","$i;
+      if($i ~ /"/) break;
+    }
+    print tag
+  }')
 
-  # Ensure columns for commit and target branch
-  $11 = commit_author;
-  if (NF < 12) $12 = "N/A";
-  $13 = target_branch;
-
-  print $0
-}' >> scanner-report.csv
+  fixed_line=$(echo "$line" | awk -v commit="${GITHUB_USERNAME}" -v branch="${TARGET_BRANCH}" -v tags="$tag_field" '
+    BEGIN { FS=OFS="," }
+    {
+      $4 = tags;  # reassign fixed tag field
+      while (NF < 14) {
+        $(NF+1)="N/A"
+      }
+      $(12)=commit
+      $(13)="N/A"
+      $(14)=branch
+      print
+    }')
+  echo "$fixed_line"
+done >> scanner-report.csv
