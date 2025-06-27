@@ -1,19 +1,24 @@
 if [ -f "scanner-report-partial.csv" ] && [ -s "scanner-report-partial.csv" ]; then
   tail -n +2 scanner-report-partial.csv | while IFS= read -r line; do
-    # Replace all commas inside quoted fields with pipes
-    fixed_line=$(perl -pe '
-      s/"([^"]*)"/do {
-        my $s = $1;
-        $s =~ s/,/|/g;
-        "\"$s\""
-      }/ge
-    ' <<< "$line")
 
+    # Extract the first 4 columns manually (rule, engine, severity, tags)
+    first4=$(echo "$line" | cut -d',' -f1-4)
+
+    # Handle quoted tags field safely by replacing comma inside it with pipe
+    fixed_first4=$(echo "$first4" | sed -E 's/(".*),(.*),(.*")/\1|\2|\3/')
+
+    # Get the rest of the line starting from column 5
+    rest=$(echo "$line" | cut -d',' -f5-)
+
+    # Merge fixed parts
+    fixed_line="${fixed_first4},${rest}"
+
+    # Now append commit/branch
     echo "$fixed_line" | awk -F',' -v OFS=',' \
       -v commit="${GITHUB_USERNAME}" \
       -v branch="${TARGET_BRANCH}" '
       {
-        gsub(/\|/, ",", $4);  # restore commas in tags
+        gsub(/\|/, ",", $4)   # restore comma in tags
         while (NF < 14) {
           $(NF+1)="N/A"
         }
@@ -21,7 +26,6 @@ if [ -f "scanner-report-partial.csv" ] && [ -s "scanner-report-partial.csv" ]; t
         $(13)="N/A"
         $(14)=branch
         print
-      }
-    '
-  done >> scanner-report.csv
+      }' >> scanner-report.csv
+  done
 fi
