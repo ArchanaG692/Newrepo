@@ -1,4 +1,4 @@
-name: Inline SFDX Auth (Final Fix)
+name: Verify Salesforce Auth
 
 on:
   push:
@@ -10,18 +10,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo (required)
+      - name: Checkout (required)
         uses: actions/checkout@v4
 
       - name: Install Salesforce CLI
         run: npm install --global sfdx-cli
 
-      - name: Authenticate using SFDX_AUTH_URL inline
+      - name: Authenticate to Salesforce
         run: |
           echo "${{ secrets.SFDX_AUTH_URL }}" > auth-url.txt
-          echo "✅ Saved secret to auth-url.txt"
-          cat auth-url.txt | head -c 50
           sfdx auth:sfdxurl:store -f auth-url.txt -a QA
 
-      - name: Confirm Salesforce Org Access
+      - name: Confirm Auth
         run: sfdx force:org:display -u QA
