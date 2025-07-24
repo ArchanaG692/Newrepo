@@ -29,7 +29,6 @@ jobs:
           mkdir -p ./test-results
           sfdx force:apex:test:run \
             --resultformat json \
-            --class-names "FT" \
             --codecoverage \
             --outputdir ./test-results \
             --wait 10
