@@ -3,26 +3,34 @@ name: Check Salesforce Test Coverage
 on:
   push:
     branches:
-      - master
+      - main
+  workflow_dispatch:
 
 jobs:
   check-coverage:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Install Salesforce CLI
+        run: npm install --global sfdx-cli
+
+      - name: Write SFDX_AUTH_URL to file (Debug)
         run: |
-          npm install --global sfdx-cli
+          echo "${{ secrets.SFDX_AUTH_URL }}" | tee auth-url.txt
+          echo "auth-url.txt content:"
+          cat auth-url.txt
+        env:
+          SFDX_AUTH_URL: ${{ secrets.SFDX_AUTH_URL }}
 
       - name: Authenticate to Salesforce
         run: |
-          echo "${{ secrets.SFDX_AUTH_URL }}" > auth-url.txt
-          sfdx auth:sfdxurl:store -f auth-url.txt -a myOrg
-        env:
-          SFDX_AUTH_URL: ${{ secrets.SFDX_AUTH_URL }}
+          sfdx auth:sfdxurl:store -f auth-url.txt -a QA
+
+      - name: Verify Org Access (Debug)
+        run: sfdx force:org:display -u QA
 
       - name: Run Apex Tests with Coverage
         run: |
@@ -31,7 +39,8 @@ jobs:
             --resultformat json \
             --codecoverage \
             --outputdir ./test-results \
-            --wait 10
+            --wait 10 \
+            -u QA
 
       - name: Extract Test Coverage %
         id: coverage
