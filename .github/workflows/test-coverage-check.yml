@@ -1,4 +1,4 @@
-name: Test Salesforce Auth
+name: Inline SFDX Auth Check
 
 on:
   push:
@@ -13,10 +13,9 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install --global sfdx-cli
 
-      - name: Authenticate using SFDX_AUTH_URL
+      - name: Authenticate to Salesforce directly (inline)
         run: |
-          echo "${{ secrets.SFDX_AUTH_URL }}" > auth-url.txt
-          sfdx auth:sfdxurl:store -f auth-url.txt -a QA
+          sfdx auth:sfdxurl:store --sfdxurlfile <(echo "${{ secrets.SFDX_AUTH_URL }}") -a QA
 
-      - name: Confirm Auth Works
+      - name: Confirm Salesforce Org Access
         run: sfdx force:org:display -u QA
