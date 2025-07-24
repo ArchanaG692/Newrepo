@@ -1,0 +1,50 @@
+name: Check Salesforce Test Coverage
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  check-coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Salesforce CLI
+        run: |
+          npm install --global sfdx-cli
+
+      - name: Authenticate to Salesforce
+        run: |
+          echo "${{ secrets.SFDX_AUTH_URL }}" > auth-url.txt
+          sfdx auth:sfdxurl:store -f auth-url.txt -a myOrg
+        env:
+          SFDX_AUTH_URL: ${{ secrets.SFDX_AUTH_URL }}
+
+      - name: Run Apex Tests with Coverage
+        run: |
+          mkdir -p ./test-results
+          sfdx force:apex:test:run \
+            --resultformat json \
+            --class-names "FT" \
+            --codecoverage \
+            --outputdir ./test-results \
+            --wait 10
+
+      - name: Extract Test Coverage %
+        id: coverage
+        run: |
+          coverage=$(cat ./test-results/test-result-*.json | jq '.summary.coverage.coveredPercent')
+          echo "Test coverage is $coverage%"
+          echo "coverage=$coverage" >> $GITHUB_OUTPUT
+
+      - name: Upload coverage report to artifacts
+        if: ${{ steps.coverage.outputs.coverage < 75 }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: low-coverage-report
+          path: ./test-results
+          retention-days: 7
