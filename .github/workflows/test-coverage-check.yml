@@ -16,19 +16,27 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install --global sfdx-cli
 
-      - name: Write SFDX_AUTH_URL to file (Debug)
+      - name: Debug: Check if SFDX_AUTH_URL secret exists
         run: |
-          echo "${{ secrets.SFDX_AUTH_URL }}" | tee auth-url.txt
-          echo "auth-url.txt content:"
-          cat auth-url.txt
+          if [ -z "${{ secrets.SFDX_AUTH_URL }}" ]; then
+            echo "❌ SFDX_AUTH_URL is EMPTY. Please check your GitHub secret."
+            exit 1
+          else
+            echo "✅ SFDX_AUTH_URL exists (masked)"
+          fi
+
+      - name: Write auth-url.txt from secret
+        run: |
+          echo "${{ secrets.SFDX_AUTH_URL }}" > auth-url.txt
+          echo "🔐 Contents of auth-url.txt (only show first part):"
+          head -c 30 auth-url.txt
         env:
           SFDX_AUTH_URL: ${{ secrets.SFDX_AUTH_URL }}
 
       - name: Authenticate to Salesforce
-        run: |
-          sfdx auth:sfdxurl:store -f auth-url.txt -a QA
+        run: sfdx auth:sfdxurl:store -f auth-url.txt -a QA
 
-      - name: Verify Org Access (Debug)
+      - name: Confirm Salesforce Org Access
         run: sfdx force:org:display -u QA
 
       - name: Run Apex Tests with Coverage
@@ -45,10 +53,10 @@ jobs:
         id: coverage
         run: |
           coverage=$(cat ./test-results/test-result-*.json | jq '.summary.coverage.coveredPercent')
-          echo "Test coverage is $coverage%"
+          echo "📊 Test coverage is $coverage%"
           echo "coverage=$coverage" >> $GITHUB_OUTPUT
 
-      - name: Upload coverage report to artifacts
+      - name: Upload coverage report to artifacts if <75%
         if: ${{ steps.coverage.outputs.coverage < 75 }}
         uses: actions/upload-artifact@v4
         with:
