@@ -1,4 +1,4 @@
-name: Debug SFDX Auth
+name: Test Salesforce Auth
 
 on:
   push:
@@ -6,34 +6,17 @@ on:
         - master
 
 jobs:
-  auth-check:
+  test-auth:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Install SFDX CLI
+    steps:
+      - name: Install Salesforce CLI
         run: npm install --global sfdx-cli
 
-      - name: Write auth-url.txt
-        env:
-          SFDX_AUTH_URL: ${{ secrets.SFDX_AUTH_URL }}
+      - name: Authenticate using SFDX_AUTH_URL
         run: |
-          echo "${SFDX_AUTH_URL}" > auth-url.txt
-          echo "✅ auth-url.txt written"
+          echo "${{ secrets.SFDX_AUTH_URL }}" > auth-url.txt
+          sfdx auth:sfdxurl:store -f auth-url.txt -a QA
 
-      - name: Show contents
-        run: |
-          echo "🔍 Contents:"
-          cat auth-url.txt || echo "❌ FILE MISSING"
-
-      - name: Try auth:sfdxurl:store
-        run: |
-          sfdx auth:sfdxurl:store -f auth-url.txt -a QA || {
-            echo "❌ Auth failed!"
-            cat auth-url.txt
-            exit 1
-          }
-
-      - name: Display org
+      - name: Confirm Auth Works
         run: sfdx force:org:display -u QA
