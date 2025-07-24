@@ -9,6 +9,7 @@ jobs:
   test-auth:
     runs-on: ubuntu-latest
 
+    
     steps:
       - name: Install Salesforce CLI
         run: npm install --global sfdx-cli
