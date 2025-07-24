@@ -1,0 +1,25 @@
+if [ -f "scanner-report-partial.csv" ] && [ -s "scanner-report-partial.csv" ]; then
+  head -n 1 scanner-report-partial.csv > scanner-report.csv
+
+  tail -n +2 scanner-report-partial.csv | while IFS= read -r line; do
+    engine=$(echo "$line" | cut -d',' -f2 | tr -d '"')
+
+    if [ "$engine" = "eslint" ]; then
+      # Reconstruct the line keeping only "Recommended" as tags
+      echo "$line" | awk -F',' -v OFS=',' '{
+        # Build new output line
+        out = ""
+        out = $1 OFS $2 OFS $3 OFS "\"Recommended\""
+
+        # Append rest of the fields starting from file (assume file is always after tags)
+        for (i=5; i<=NF; i++) {
+          out = out OFS $i
+        }
+
+        print out
+      }' >> scanner-report.csv
+    else
+      echo "$line" >> scanner-report.csv
+    fi
+  done
+fi
