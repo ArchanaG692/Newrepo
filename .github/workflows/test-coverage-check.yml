@@ -1,9 +1,9 @@
-name: Inline SFDX Auth Check
+name: Inline SFDX Auth (Final Fix)
 
 on:
   push:
     branches:
-        - master
+        - maser
 
 jobs:
   test-auth:
@@ -13,9 +13,10 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install --global sfdx-cli
 
-      - name: Authenticate to Salesforce directly (inline)
+      - name: Inline auth using secret
         run: |
-          sfdx auth:sfdxurl:store --sfdxurlfile <(echo "${{ secrets.SFDX_AUTH_URL }}") -a QA
+          echo "${{ secrets.SFDX_AUTH_URL }}" > auth-url.txt
+          sfdx auth:sfdxurl:store -f auth-url.txt -a QA
 
-      - name: Confirm Salesforce Org Access
+      - name: Check org access
         run: sfdx force:org:display -u QA
