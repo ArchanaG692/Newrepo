@@ -16,7 +16,7 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install --global sfdx-cli
 
-      - name: Debug: Check if SFDX_AUTH_URL secret exists
+      - name: "Debug: Check if SFDX_AUTH_URL secret exists"
         run: |
           if [ -z "${{ secrets.SFDX_AUTH_URL }}" ]; then
             echo "❌ SFDX_AUTH_URL is EMPTY. Please check your GitHub secret."
@@ -26,12 +26,12 @@ jobs:
           fi
 
       - name: Write auth-url.txt from secret
-        run: |
-          echo "${{ secrets.SFDX_AUTH_URL }}" > auth-url.txt
-          echo "🔐 Contents of auth-url.txt (only show first part):"
-          head -c 30 auth-url.txt
         env:
           SFDX_AUTH_URL: ${{ secrets.SFDX_AUTH_URL }}
+        run: |
+          echo "${SFDX_AUTH_URL}" > auth-url.txt
+          echo "🔐 Contents of auth-url.txt (first 30 chars):"
+          head -c 30 auth-url.txt || true
 
       - name: Authenticate to Salesforce
         run: sfdx auth:sfdxurl:store -f auth-url.txt -a QA
