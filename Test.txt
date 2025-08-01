@@ -1,46 +1,29 @@
-- name: Convert test-result.json to coverage.csv
+- name: Convert test-result-codecoverage.json to CoverageReport.csv
   run: |
-    echo "Converting test-result.json to coverage.csv..."
-
-    FILE_PATH="${GITHUB_WORKSPACE}/force-app/main/default/lwc/tmpLwcComponent/test/test-result.json"
-    CSV_PATH="${GITHUB_WORKSPACE}/force-app/main/default/lwc/tmpLwcComponent/test/coverage.csv"
+    echo "Converting test-result-codecoverage.json to CoverageReport.csv..."
+    FILE_PATH="force-app/main/default/lwc/tmpLwcComponent/test/test-result-codecoverage.json"
+    CSV_PATH="force-app/main/default/lwc/tmpLwcComponent/test/CoverageReport.csv"
 
     if [ ! -f "$FILE_PATH" ]; then
       echo "❌ File not found: $FILE_PATH"
       exit 1
     fi
 
-    echo "✅ Found test-result.json. Generating coverage.csv..."
-    echo "OrgWideCoverage,TestRunCoverage,PassRate,PassingTests,FailingTests" > "$CSV_PATH"
-    jq -r '.result.summary | [.orgWideCoverage, .testRunCoverage, .passRate, .passing, .failing] | @csv' "$FILE_PATH" >> "$CSV_PATH"
+    # Add headers
+    echo "Id,Name,TotalLines,CoveredLines,TotalCovered,CoveredPercent" > "$CSV_PATH"
 
-- name: Upload coverage.csv to Salesforce via REST API
-  run: |
-    echo "Uploading coverage.csv to Salesforce..."
+    # Convert JSON to CSV
+    jq -r '
+      .[] |
+      [
+        .id,
+        .name,
+        .totalLines,
+        (.lines | keys_unsorted | join(";")),
+        .totalCovered,
+        .coveredPercent
+      ] | @csv
+    ' "$FILE_PATH" >> "$CSV_PATH"
 
-    CSV_PATH="${GITHUB_WORKSPACE}/force-app/main/default/lwc/tmpLwcComponent/test/coverage.csv"
-    FILE_NAME="CoverageReport.csv"
-
-    if [ ! -f "$CSV_PATH" ]; then
-      echo "❌ CSV file not found: $CSV_PATH"
-      exit 1
-    fi
-
-    ACCESS_TOKEN=$(sf org display --target-org arpoc2 --json | jq -r '.result.accessToken')
-    INSTANCE_URL=$(sf org display --target-org arpoc2 --json | jq -r '.result.instanceUrl')
-    FILE_CONTENT=$(base64 "$CSV_PATH" | tr -d '\n')
-
-    response=$(curl -s -X POST "$INSTANCE_URL/services/data/v60.0/sobjects/ContentVersion" \
-      -H "Authorization: Bearer $ACCESS_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d @<(cat <<EOF
-{
-  "Title": "$FILE_NAME",
-  "PathOnClient": "$FILE_NAME",
-  "VersionData": "$FILE_CONTENT"
-}
-EOF
-))
-
-    echo "✅ Salesforce Upload Response:"
-    echo "$response"
+    echo "✅ CoverageReport.csv generated:"
+    cat "$CSV_PATH"
