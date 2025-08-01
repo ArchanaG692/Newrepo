@@ -1,69 +1,29 @@
+- name: Upload coverage.csv file to Salesforce via REST API
+  run: |
+    echo "Uploading coverage.csv to Salesforce..."
 
-name: Check Salesforce test coverage
+    FILE="force-app/main/default/lwc/tmpLwcComponent/test/coverage.csv"
+    FILE_NAME="CoverageReport.csv"
 
-on:
-  push:
-    branches:
-      - ESODev1
+    # Get access token and instance URL from the default authenticated org (arpoc2)
+    ACCESS_TOKEN=$(sf org display --target-org arpoc2 --json | jq -r '.result.accessToken')
+    INSTANCE_URL=$(sf org display --target-org arpoc2 --json | jq -r '.result.instanceUrl')
 
-jobs:
-  check-coverage:
-    runs-on: 
-      group: cvs-linux-self-hosted
+    # Encode the file in base64 for VersionData
+    FILE_CONTENT=$(base64 "$FILE" | tr -d '\n')
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    # Call Salesforce REST API to upload ContentVersion
+    response=$(curl -s -X POST "$INSTANCE_URL/services/data/v60.0/sobjects/ContentVersion" \
+      -H "Authorization: Bearer $ACCESS_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d @<(cat <<EOF
+{
+  "Title": "$FILE_NAME",
+  "PathOnClient": "$FILE_NAME",
+  "VersionData": "$FILE_CONTENT"
+}
+EOF
+))
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20.15
-          
-      - name: Install Salesforce CLI
-        run: npm install --global @salesforce/cli
-
-      - name: SF Update
-        run: |
-          npm update --global @salesforce/cli
-          sf plugins update
-
-      - name: Authenticate with Salesforce
-        id: sf-auth
-        run: |
-          echo "Authenticating with Salesforce..."
-          echo "${{secrets.SFDX_AUTH_URL}}" > auth-url.txt
-          sfdx force:auth:sfdxurl:store --sfdxurlfile auth-url.txt --setalias arpoc2 --setdefaultusername
-          echo "Successfully authenticated with Salesforce."
-
-      - name: Run Apex Tests & generate code coverage
-        run: |   
-          mkdir  -p force-app/main/default/lwc/tmpLwcComponent/test/
-          cd  force-app/main/default/lwc/tmpLwcComponent/test/
-          sf apex run test --target-org arpoc2 --tests FileTest --code-coverage --result-format human --output-dir "force-app/main/default/lwc/tmpLwcComponent/test/coverage.csv"
-        
-
-      - name: Send notification email (start)
-        uses: dawidd6/action-send-mail@7ac0fb1e367721ffc3985c672ba2e7659379bc00 # v5
-        with:
-          server_address: smtp.office365.com
-          server_port: 587
-
-          subject: "Code Coverage Test"
-          body: "Please find the attached list."
-          to: boddun@aetna.com
-          from: archana.gogeneni@aetna.com
-          attachments: "force-app/main/default/lwc/tmpLwcComponent/test/coverage.csv"
-
-
-      #  sfdx force:apex:test:run --code-coverage --detailed-coverage --synchronous -r junit -w 3600 -o arpoc2 --output-dir "force-app/main/default/lwc/tmpLwcComponent/test/coverage.csv"
-        # username: ${{ secrets.EMAIL_USERNAME }}
-        # password: ${{ secrets.EMAIL_PASSWORD }}
-      # - name: Parse test coverage
-      #   id: coverage
-      #   run: |
-      #     coverage=$(cat ./test-results/testresult-*.json | jq '.summary.coverage.coveredPercent')
-      #     echo "Test Coverage is ${coverage}%"
-      #     echo "coverage=${coverage}" >> $GITHUB_OUTPUT
+    echo "Salesforce Upload Response:"
+    echo "$response"
