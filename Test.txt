@@ -1,29 +1,50 @@
 - name: Convert test-result-codecoverage.json to CoverageReport.csv
   run: |
-    echo "Converting test-result-codecoverage.json to CoverageReport.csv..."
+    echo "📄 Starting coverage JSON to CSV conversion..."
+
     FILE_PATH="force-app/main/default/lwc/tmpLwcComponent/test/test-result-codecoverage.json"
     CSV_PATH="force-app/main/default/lwc/tmpLwcComponent/test/CoverageReport.csv"
+    OUTPUT_DIR="force-app/main/default/lwc/tmpLwcComponent/test"
 
+    # Make sure output directory exists
+    mkdir -p "$OUTPUT_DIR"
+
+    # Check if JSON file exists
     if [ ! -f "$FILE_PATH" ]; then
       echo "❌ File not found: $FILE_PATH"
+      echo "Use 'find force-app -name test-result-codecoverage.json' to debug."
       exit 1
     fi
 
-    # Add headers
-    echo "Id,Name,TotalLines,CoveredLines,TotalCovered,CoveredPercent" > "$CSV_PATH"
+    # Validate JSON format
+    if ! jq empty "$FILE_PATH" 2>/dev/null; then
+      echo "❌ Invalid JSON structure in $FILE_PATH"
+      exit 1
+    fi
+
+    # Write CSV header
+    echo "Id,Name,Total Lines,Total Uncovered Lines,Total Covered,Covered Percent" > "$CSV_PATH"
 
     # Convert JSON to CSV
-    jq -r '
+    if ! jq -r '
       .[] |
       [
         .id,
         .name,
         .totalLines,
-        (.lines | keys_unsorted | join(";")),
-        .totalCovered,
-        .coveredPercent
+        (
+          (.lines // {} ) |
+          to_entries |
+          map(select(.value == 0)) |
+          length
+        ),
+        (.totalCovered // 0),
+        (.coveredPercent // 0)
       ] | @csv
-    ' "$FILE_PATH" >> "$CSV_PATH"
+    ' "$FILE_PATH" >> "$CSV_PATH"; then
+      echo "❌ jq failed to process the file."
+      exit 1
+    fi
 
-    echo "✅ CoverageReport.csv generated:"
+    echo "✅ CoverageReport.csv successfully generated:"
     cat "$CSV_PATH"
