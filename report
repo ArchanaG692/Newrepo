@@ -1,6 +1,27 @@
-# Replace internal commas in the "tags" column with semicolons
-  gsub(/,/, ";", $4)
-
-
-rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,Commit,ActualLine,TargetBranch
-"no-unused-vars","eslint",2,"Recommended,ErrorProne,JavaScript","force-app/main/default/lwc/tmpLwcComponent/tmpLwcComponent.js",2,10,2,21,Archana-Gogeneni_cvsh,"https://eslint.org/docs/latest/rules/no-unused-vars",ESODev1
+public class ESO_SendMail {
+    public static void sendMail(string emailToList, string subject, string body){
+        try{
+            Messaging.SingleEmailMessage semail = new Messaging.SingleEmailMessage();           
+            semail.setToAddresses(addressStringToList(emailToList));
+            semail.setCCAddresses(addressStringToList(system.label.ESO_RecipientsList));
+            semail.setSubject(subject);
+            semail.setHTMLBody(body +'<br/>');
+            Messaging.sendEmail(new Messaging.SingleEmailMessage[] {semail});
+        }
+        catch(Exception e){
+            system.debug('error--'+ e.getMessage() + ' on line #' + e.getLineNumber());
+        }
+    }
+    
+    public static list<string> addressStringToList(string emailToList){
+        list<string> addressesList = new list<string>();
+        if(!String.isblank(emailToList)){
+            for(String emailId:emailToList.split(';')){
+                if(emailId != null && emailId !=''&& emailId != ' '){
+                    addressesList.add(emailId.trim());
+                }
+            }
+        }
+        return addressesList;
+    }
+}
