@@ -1,43 +1,69 @@
-String flowApiName = 'Your_Screen_Flow_API_Name';
 
-// Step 1: Get the Flow Definition View
-FlowDefinitionView defView = [
-    SELECT Id, DeveloperName, DurableId
-    FROM FlowDefinitionView
-    WHERE DeveloperName = :flowApiName
-    LIMIT 1
-];
+name: Check Salesforce test coverage
 
-// Step 2: Get the latest version
-FlowVersionView latestVersion = [
-    SELECT Id, VersionNumber, Status
-    FROM FlowVersionView
-    WHERE FlowDefinitionViewId = :defView.Id
-    ORDER BY VersionNumber DESC
-    LIMIT 1
-];
+on:
+  push:
+    branches:
+      - ESODev1
 
-System.debug('Latest Version: ' + latestVersion.VersionNumber + ' | Status: ' + latestVersion.Status);
+jobs:
+  check-coverage:
+    runs-on: 
+      group: cvs-linux-self-hosted
 
-// Step 3: Activate by updating FlowDefinition’s ActiveVersionId
-// Use DurableId from the FlowDefinitionView to get writeable FlowDefinition
-List<FlowDefinition> flowDefs = [
-    SELECT Id, DeveloperName, ActiveVersionId
-    FROM FlowDefinition
-    WHERE DurableId = :defView.DurableId
-    LIMIT 1
-];
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-if (!flowDefs.isEmpty()) {
-    FlowDefinition flowDef = flowDefs[0];
-    
-    if (flowDef.ActiveVersionId != latestVersion.Id) {
-        flowDef.ActiveVersionId = latestVersion.Id;
-        update flowDef;
-        System.debug('✅ Flow activated successfully!');
-    } else {
-        System.debug('ℹ️ Latest version is already active.');
-    }
-} else {
-    System.debug('❌ Could not find writable FlowDefinition record.');
-}
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.15
+          
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: SF Update
+        run: |
+          npm update --global @salesforce/cli
+          sf plugins update
+
+      - name: Authenticate with Salesforce
+        id: sf-auth
+        run: |
+          echo "Authenticating with Salesforce..."
+          echo "${{secrets.SFDX_AUTH_URL}}" > auth-url.txt
+          sfdx force:auth:sfdxurl:store --sfdxurlfile auth-url.txt --setalias arpoc2 --setdefaultusername
+          echo "Successfully authenticated with Salesforce."
+
+      - name: Run Apex Tests & generate code coverage
+        run: |   
+          mkdir  -p force-app/main/default/lwc/tmpLwcComponent/test/
+          cd  force-app/main/default/lwc/tmpLwcComponent/test/
+          sf apex run test --target-org arpoc2 --tests FileTest --code-coverage --result-format human --output-dir "force-app/main/default/lwc/tmpLwcComponent/test/coverage.csv"
+        
+
+      - name: Send notification email (start)
+        uses: dawidd6/action-send-mail@7ac0fb1e367721ffc3985c672ba2e7659379bc00 # v5
+        with:
+          server_address: smtp.office365.com
+          server_port: 587
+
+          subject: "Code Coverage Test"
+          body: "Please find the attached list."
+          to: boddun@aetna.com
+          from: archana.gogeneni@aetna.com
+          attachments: "force-app/main/default/lwc/tmpLwcComponent/test/coverage.csv"
+
+
+      #  sfdx force:apex:test:run --code-coverage --detailed-coverage --synchronous -r junit -w 3600 -o arpoc2 --output-dir "force-app/main/default/lwc/tmpLwcComponent/test/coverage.csv"
+        # username: ${{ secrets.EMAIL_USERNAME }}
+        # password: ${{ secrets.EMAIL_PASSWORD }}
+      # - name: Parse test coverage
+      #   id: coverage
+      #   run: |
+      #     coverage=$(cat ./test-results/testresult-*.json | jq '.summary.coverage.coveredPercent')
+      #     echo "Test Coverage is ${coverage}%"
+      #     echo "coverage=${coverage}" >> $GITHUB_OUTPUT
