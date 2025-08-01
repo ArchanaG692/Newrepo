@@ -1,29 +1,15 @@
-- name: Upload coverage.csv file to Salesforce via REST API
+- name: Convert coverage JSON to CSV
   run: |
-    echo "Uploading coverage.csv to Salesforce..."
+    echo "Converting coverage.json to coverage.csv..."
 
-    FILE="force-app/main/default/lwc/tmpLwcComponent/test/coverage.csv"
-    FILE_NAME="CoverageReport.csv"
+    FILE_PATH="force-app/main/default/lwc/tmpLwcComponent/test/coverage.json"
+    CSV_PATH="force-app/main/default/lwc/tmpLwcComponent/test/coverage.csv"
 
-    # Get access token and instance URL from the default authenticated org (arpoc2)
-    ACCESS_TOKEN=$(sf org display --target-org arpoc2 --json | jq -r '.result.accessToken')
-    INSTANCE_URL=$(sf org display --target-org arpoc2 --json | jq -r '.result.instanceUrl')
-
-    # Encode the file in base64 for VersionData
-    FILE_CONTENT=$(base64 "$FILE" | tr -d '\n')
-
-    # Call Salesforce REST API to upload ContentVersion
-    response=$(curl -s -X POST "$INSTANCE_URL/services/data/v60.0/sobjects/ContentVersion" \
-      -H "Authorization: Bearer $ACCESS_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d @<(cat <<EOF
-{
-  "Title": "$FILE_NAME",
-  "PathOnClient": "$FILE_NAME",
-  "VersionData": "$FILE_CONTENT"
-}
-EOF
-))
-
-    echo "Salesforce Upload Response:"
-    echo "$response"
+    count=$(jq '.coverage | length' "$FILE_PATH")
+    if [ "$count" -gt 0 ]; then
+      echo "ClassName,LinesCovered,LinesUncovered,TotalLines" > "$CSV_PATH"
+      jq -r '.coverage[] | [.name, .numLinesCovered, .numLinesUncovered, (.numLinesCovered + .numLinesUncovered)] | @csv' "$FILE_PATH" >> "$CSV_PATH"
+    else
+      echo "No coverage data found."
+      echo "ClassName,LinesCovered,LinesUncovered,TotalLines" > "$CSV_PATH"
+    fi
