@@ -1,0 +1,28 @@
+public class ESO_EmailWithAttachmentHandler {
+    public static void sendCoverageReportEmail(String emailToList, Id contentVersionId) {
+        try {
+            ContentVersion cv = [
+                SELECT Title, VersionData 
+                FROM ContentVersion 
+                WHERE Id = :contentVersionId 
+                LIMIT 1
+            ];
+
+            Messaging.EmailFileAttachment attachment = new Messaging.EmailFileAttachment();
+            attachment.setFileName(cv.Title);
+            attachment.setBody(cv.VersionData);
+            attachment.setContentType('text/csv');
+
+            Messaging.SingleEmailMessage email = new Messaging.SingleEmailMessage();
+            email.setToAddresses(ESO_SendMail.addressStringToList(emailToList));
+            email.setCcAddresses(ESO_SendMail.addressStringToList(System.Label.ESO_RecipientsList));
+            email.setSubject('Salesforce Test Coverage Report');
+            email.setHtmlBody('Hi,<br/><br/>Please find attached the latest test coverage report.<br/><br/>Regards,<br/>DevOps Team');
+            email.setFileAttachments(new Messaging.EmailFileAttachment[] { attachment });
+
+            Messaging.sendEmail(new Messaging.SingleEmailMessage[] { email });
+        } catch (Exception e) {
+            System.debug('Error sending test coverage email: ' + e.getMessage());
+        }
+    }
+}
