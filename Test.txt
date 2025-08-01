@@ -1,4 +1,25 @@
-- name: Convert JUnit to CSV
-        run: |
-          chmod +x ./convert_junit_to_csv.sh
-          ./convert_junit_to_csv.sh test-results/test-result.xml > code-coverage.csv
+#!/bin/bash
+
+# Input: test-result.xml
+# Output: CSV with columns: ClassName, MethodName, Time, Status
+
+echo "ClassName,MethodName,Time,Status"
+
+xmllint --format "$1" | \
+  awk '
+    /<testcase/ {
+      gsub(/.*classname="/, "", $0);
+      class=substr($0, 1, index($0, "\"")-1);
+      gsub(/.*name="/, "", $0);
+      name=substr($0, 1, index($0, "\"")-1);
+      gsub(/.*time="/, "", $0);
+      time=substr($0, 1, index($0, "\"")-1);
+      status="Pass";
+    }
+    /<failure/ {
+      status="Fail";
+    }
+    /<\/testcase>/ {
+      print class "," name "," time "," status;
+    }
+  '
