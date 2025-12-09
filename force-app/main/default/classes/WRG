@@ -122,23 +122,16 @@ public without sharing class WeeklyVulnerabilityEmailService implements Schedula
     // CSV BUILDER FOR ATTACHMENT
     // -------------------------
     @TestVisible
-    private static String buildCsv(List<Vulnerability__c> vulns) {
-        StringBuilder sb = new StringBuilder();
-
-        // Header row – adjust columns as needed
-        sb.append('Name,Severity,Status,Rule,File,Line,CreatedDate\n');
-
-        for (Vulnerability__c v : vulns) {
-            sb.append(csvEscape(v.Name)).append(',');
-            sb.append(csvEscape(v.Severity__c)).append(',');
-            sb.append(csvEscape(v.Status__c)).append(',');
-            sb.append(csvEscape(v.RuleName__c)).append(',');
-            sb.append(csvEscape(v.FilePath__c)).append(',');
-            sb.append(v.LineNumber__c == null ? '' : String.valueOf(v.LineNumber__c)).append(',');
-            sb.append(csvEscape(String.valueOf(v.CreatedDate))).append('\n');
+    private static String csvEscape(String val) {
+        if (val == null) return '';
+        Boolean needsQuotes = val.contains(',') || val.contains('"') || val.contains('\n') || val.contains('\r');
+        String v = val.replace('"', '""'); // escape quotes
+        if (needsQuotes) {
+            return '"' + v + '"';
         }
-        return sb.toString();
+        return v;
     }
+
 
     // Escape CSV fields (wrap in quotes if needed, escape inner quotes)
     @TestVisible
