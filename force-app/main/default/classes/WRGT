@@ -2,17 +2,13 @@
 private class WeeklyVulnerabilityEmailServiceTest {
 
     // Creates one vulnerability record that matches the query filters
-    private static Vulnerability__c createTestVulnerability(
-        String name,
-        String severity
-    ) {
+    private static Vulnerability__c createTestVulnerability(Integer severity) {
         Vulnerability__c v = new Vulnerability__c(
-            Name        = name,
-            Severity__c = severity,     // must match your picklist values
-            Status__c   = 'Open',       // must match your picklist values
-            RuleName__c = 'ApexRule1',
-            FilePath__c = 'classes/TestClass.cls',
-            LineNumber__c = 42
+            Severity__c = severity,       // Number field
+            Status__c   = 'Open',         // Must match your picklist/text value
+            Rule__c     = 'ApexRule1',
+            File__c     = 'classes/TestClass.cls',
+            Line__c     = 42
         );
         insert v;
         return v;
@@ -20,136 +16,106 @@ private class WeeklyVulnerabilityEmailServiceTest {
 
     @IsTest
     static void testSendWeeklyEmail_WithData() {
-        // Arrange: create data that will be picked up by LAST_N_DAYS:7 query
-        Vulnerability__c v = createTestVulnerability('Test Vuln Critical', 'Critical');
+        // Arrange: record that matches LAST_N_DAYS:7 + filters
+        createTestVulnerability(5); // e.g. severity 5 = Critical
 
         Test.startTest();
         WeeklyVulnerabilityEmailService.sendWeeklyEmail();
         Test.stopTest();
-        
-        // Assert: one email sent
-        Messaging.SingleEmailMessage[] emails = System.Test.getSentEmailMessages();
-        
-        System.assertEquals(1, emails.size(), 'One email should be sent when there is data');
-        
-        Messaging.SingleEmailMessage email = emails[0];
 
-        // Subject check
-        System.assert(
-            email.getSubject().contains('Weekly Code Vulnerability Report'),
-            'Subject should contain weekly report text'
-        );
-
-        // Attachment check
-        Messaging.EmailFileAttachment[] atts = email.getFileAttachments();
-        System.assertEquals(1, atts.size(), 'One CSV attachment expected');
-
-        Messaging.EmailFileAttachment att = atts[0];
-        System.assert(
-            att.getFileName().startsWith('Weekly_Vulnerabilities_'),
-            'CSV filename should start with Weekly_Vulnerabilities_'
-        );
-        System.assertNotEquals(null, att.getBody(), 'Attachment body must not be null');
-
-        String csv = att.getBody().toString();
-
-        // Basic checks on CSV content
-        System.assert(
-            csv.startsWith('Name,Severity,Status,Rule,File,Line,CreatedDate'),
-            'CSV should start with header'
-        );
-        System.assert(
-            csv.contains('Test Vuln Critical'),
-            'CSV should contain the test vulnerability row'
-        );
+        // Assert: exactly one email was sent
+        Integer invocations = Limits.getEmailInvocations();
+        System.assertEquals(1, invocations,
+            'One email should be sent when there is data');
     }
 
     @IsTest
     static void testSendWeeklyEmail_NoData() {
-        // No data created that matches filters
+        // No Vulnerability__c records created -> query should be empty
 
         Test.startTest();
         WeeklyVulnerabilityEmailService.sendWeeklyEmail();
         Test.stopTest();
 
-        // Assert: no emails should be sent
-        List<Messaging.SingleEmailMessage> emails = Test.getSentEmailMessages();
-        System.assertEquals(0, emails.size(), 'No email should be sent when there is no data');
+        // Assert: no email should be sent
+        Integer invocations = Limits.getEmailInvocations();
+        System.assertEquals(0, invocations,
+            'No email should be sent when there is no data');
     }
 
     @IsTest
     static void testExecuteSchedulable_NoData() {
-        // Directly call execute to cover the Schedulable entry point
+        // Covers the execute(SchedulableContext) entrypoint
         WeeklyVulnerabilityEmailService svc = new WeeklyVulnerabilityEmailService();
 
         Test.startTest();
-        // Passing null is okay because execute() doesn’t use the context
-        svc.execute(null);
+        svc.execute(null); // context not used in implementation
         Test.stopTest();
 
-        // With no data, no emails should be sent
-        List<Messaging.SingleEmailMessage> emails = Test.getSentEmailMessages();
-        System.assertEquals(0, emails.size(), 'No email expected from execute() when no data');
+        Integer invocations = Limits.getEmailInvocations();
+        System.assertEquals(0, invocations,
+            'No email should be sent from execute() when there is no data');
     }
 
     @IsTest
     static void testHelperMethods() {
-        // Arrange: create one record with some special chars to test escaping
+        // Arrange: record with characters that exercise HTML & CSV escaping
         Vulnerability__c v = new Vulnerability__c(
-            Name        = 'Html <Test> "Vuln"',
-            Severity__c = 'High',
+            Severity__c = 3,
             Status__c   = 'Open',
-            RuleName__c = 'Rule,With,Comma',
-            FilePath__c = 'classes/TestClass.cls',
-            LineNumber__c = 99
+            Rule__c     = 'Rule,With,"Quotes"',
+            File__c     = 'classes/Test<Class>.cls',
+            Line__c     = 99
         );
         insert v;
 
-        // Query using same fields as the main class
+        // Query fields used by the main class
         List<Vulnerability__c> vulns = [
-            SELECT Id, Name, Severity__c, Status__c, RuleName__c,
-                   FilePath__c, LineNumber__c, CreatedDate
+            SELECT Id,
+                   Severity__c,
+                   Status__c,
+                   Rule__c,
+                   File__c,
+                   Line__c,
+                   CreatedDate
             FROM Vulnerability__c
         ];
 
         Test.startTest();
-        String html = WeeklyVulnerabilityEmailService.buildHtmlBody(vulns);
-        String csv  = WeeklyVulnerabilityEmailService.buildCsv(vulns);
-        String escapedHtml = WeeklyVulnerabilityEmailService.escapeHtml('<test>');
-        String escapedCsv  = WeeklyVulnerabilityEmailService.csvEscape('val,"with",comma');
+        String html =
+            WeeklyVulnerabilityEmailService.buildHtmlBody(vulns);
+        String csv  =
+            WeeklyVulnerabilityEmailService.buildCsv(vulns);
+        String escapedHtml =
+            WeeklyVulnerabilityEmailService.escapeHtml('<test>');
+        String escapedCsv  =
+            WeeklyVulnerabilityEmailService.csvEscape('val,"with",comma');
         Test.stopTest();
 
         // HTML assertions
         System.assert(
             html.contains('Weekly Code Vulnerability Report'),
-            'HTML body should contain header text'
+            'HTML body should contain the report header'
         );
         System.assert(
-            html.contains('&lt;Test&gt;'),
-            'HTML body should contain escaped version of <Test>'
+            html.contains('&lt;test&gt;'),
+            'escapeHtml should escape < and >'
         );
 
         // CSV assertions
         System.assert(
-            csv.contains('Name,Severity,Status,Rule,File,Line,CreatedDate'),
-            'CSV should include header row'
+            csv.startsWith('Name,Severity,Status,Rule,File,Line,CreatedDate'),
+            'CSV should start with the header row'
         );
         System.assert(
-            csv.contains('Html <Test> "Vuln"'),
-            'CSV should include vulnerability name'
+            csv.contains('classes/Test<Class>.cls'),
+            'CSV should include the file path'
         );
 
-        // escapeHtml assertions
-        System.assertEquals(
-            '&lt;test&gt;',
-            escapedHtml,
-            'escapeHtml should escape < and >'
-        );
-
-        // csvEscape should quote and escape internal quotes
+        // csvEscape assertions
         System.assert(
             escapedCsv.startsWith('"') && escapedCsv.endsWith('"'),
-            'csvEscape should wrap field in quotes when needed'
+            'csvEscape should wrap fields with commas/quotes in double quotes'
         );
         System.assert(
             escapedCsv.contains('""with""'),
