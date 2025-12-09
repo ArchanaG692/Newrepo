@@ -122,14 +122,24 @@ public without sharing class WeeklyVulnerabilityEmailService implements Schedula
     // CSV BUILDER FOR ATTACHMENT
     // -------------------------
     @TestVisible
-    private static String csvEscape(String val) {
-        if (val == null) return '';
-        Boolean needsQuotes = val.contains(',') || val.contains('"') || val.contains('\n') || val.contains('\r');
-        String v = val.replace('"', '""'); // escape quotes
-        if (needsQuotes) {
-            return '"' + v + '"';
+    private static String buildCsv(List<Vulnerability__c> vulns) {
+        // Header row – adjust columns as needed
+        String csv = 'Name,Severity,Status,Rule,File,Line,CreatedDate\n';
+    
+        for (Vulnerability__c v : vulns) {
+            csv +=
+                csvEscape(v.Name)              + ',' +
+                csvEscape(v.Severity__c)       + ',' +
+                csvEscape(v.Status__c)         + ',' +
+                csvEscape(v.RuleName__c)       + ',' +
+                csvEscape(v.FilePath__c)       + ',' +
+                (v.LineNumber__c == null
+                    ? ''
+                    : String.valueOf(v.LineNumber__c)) + ',' +
+                csvEscape(String.valueOf(v.CreatedDate)) +
+                '\n';
         }
-        return v;
+        return csv;
     }
 
 
