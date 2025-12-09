@@ -26,11 +26,12 @@ private class WeeklyVulnerabilityEmailServiceTest {
         Test.startTest();
         WeeklyVulnerabilityEmailService.sendWeeklyEmail();
         Test.stopTest();
-
+        
         // Assert: one email sent
-        List<Messaging.SingleEmailMessage> emails = Test.getSentEmailMessages();
+        Messaging.SingleEmailMessage[] emails = System.Test.getSentEmailMessages();
+        
         System.assertEquals(1, emails.size(), 'One email should be sent when there is data');
-
+        
         Messaging.SingleEmailMessage email = emails[0];
 
         // Subject check
