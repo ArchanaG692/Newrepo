@@ -1,0 +1,154 @@
+public without sharing class WeeklyVulnerabilityEmailService implements Schedulable {
+
+    // 👉 Change these to your real recipients
+    @TestVisible
+    private static final List<String> RECIPIENTS = new List<String>{
+        'devops-team@example.com',
+        'security-team@example.com'
+    };
+
+    @TestVisible
+    private static final String SUBJECT = 'Weekly Code Vulnerability Report';
+
+    public void execute(SchedulableContext sc) {
+        sendWeeklyEmail();
+    }
+
+    public static void sendWeeklyEmail() {
+        List<Vulnerability__c> vulns = getVulnerabilitiesForLastWeek();
+
+        if (vulns.isEmpty()) {
+            // Optional: send "All clear" email instead of skipping
+            return;
+        }
+
+        // Build HTML table for email body
+        String htmlBody = buildHtmlBody(vulns);
+
+        // Build CSV content for attachment
+        String csvContent = buildCsv(vulns);
+
+        Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+        mail.setToAddresses(RECIPIENTS);
+        mail.setSubject(SUBJECT);
+        mail.setHtmlBody(htmlBody);
+
+        // Create CSV attachment
+        Messaging.EmailFileAttachment csvAttachment = new Messaging.EmailFileAttachment();
+        csvAttachment.setFileName('Weekly_Vulnerabilities_' + Date.today().format() + '.csv');
+        csvAttachment.setContentType('text/csv');
+        csvAttachment.setInline(false);
+        csvAttachment.setBody(Blob.valueOf(csvContent));
+
+        mail.setFileAttachments(new List<Messaging.EmailFileAttachment>{ csvAttachment });
+
+        Messaging.sendEmail(new List<Messaging.SingleEmailMessage>{ mail });
+    }
+
+    @TestVisible
+    private static List<Vulnerability__c> getVulnerabilitiesForLastWeek() {
+        // ❗ Adjust field names / filters as per your org
+        return [
+            SELECT Id,
+                   Name,
+                   Severity__c,
+                   Status__c,
+                   RuleName__c,
+                   FilePath__c,
+                   LineNumber__c,
+                   CreatedDate
+            FROM Vulnerability__c
+            WHERE Status__c = 'Open'
+              AND Severity__c IN ('Critical', 'High')
+              AND CreatedDate = LAST_N_DAYS:7
+            ORDER BY Severity__c DESC, CreatedDate DESC
+        ];
+    }
+
+    // -------------------------
+    // HTML TABLE FOR EMAIL BODY
+    // -------------------------
+    @TestVisible
+    private static String buildHtmlBody(List<Vulnerability__c> vulns) {
+        String html = '';
+        html += '<html><body>';
+        html += '<h2>Weekly Code Vulnerability Report</h2>';
+        html += '<p>Total Vulnerabilities: ' + vulns.size() + '</p>';
+
+        html += '<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-family:Arial;font-size:12px;">';
+        html += '<thead><tr>';
+        html += '<th>Name</th>';
+        html += '<th>Severity</th>';
+        html += '<th>Status</th>';
+        html += '<th>Rule</th>';
+        html += '<th>File</th>';
+        html += '<th>Line</th>';
+        html += '<th>Created Date</th>';
+        html += '</tr></thead><tbody>';
+
+        for (Vulnerability__c v : vulns) {
+            html += '<tr>';
+            html += '<td>' + escapeHtml(v.Name)        + '</td>';
+            html += '<td>' + escapeHtml(v.Severity__c) + '</td>';
+            html += '<td>' + escapeHtml(v.Status__c)   + '</td>';
+            html += '<td>' + escapeHtml(v.RuleName__c) + '</td>';
+            html += '<td>' + escapeHtml(v.FilePath__c) + '</td>';
+            html += '<td>' + String.valueOf(v.LineNumber__c) + '</td>';
+            html += '<td>' + String.valueOf(v.CreatedDate) + '</td>';
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        html += '<p>CSV with full details is attached.</p>';
+        html += '</body></html>';
+
+        return html;
+    }
+
+    // Very simple HTML escaping
+    @TestVisible
+    private static String escapeHtml(String input) {
+        if (input == null) return '';
+        String s = input;
+        s = s.replace('&', '&amp;');
+        s = s.replace('<', '&lt;');
+        s = s.replace('>', '&gt;');
+        s = s.replace('"', '&quot;');
+        s = s.replace('\'', '&#39;');
+        return s;
+    }
+
+    // -------------------------
+    // CSV BUILDER FOR ATTACHMENT
+    // -------------------------
+    @TestVisible
+    private static String buildCsv(List<Vulnerability__c> vulns) {
+        StringBuilder sb = new StringBuilder();
+
+        // Header row – adjust columns as needed
+        sb.append('Name,Severity,Status,Rule,File,Line,CreatedDate\n');
+
+        for (Vulnerability__c v : vulns) {
+            sb.append(csvEscape(v.Name)).append(',');
+            sb.append(csvEscape(v.Severity__c)).append(',');
+            sb.append(csvEscape(v.Status__c)).append(',');
+            sb.append(csvEscape(v.RuleName__c)).append(',');
+            sb.append(csvEscape(v.FilePath__c)).append(',');
+            sb.append(v.LineNumber__c == null ? '' : String.valueOf(v.LineNumber__c)).append(',');
+            sb.append(csvEscape(String.valueOf(v.CreatedDate))).append('\n');
+        }
+        return sb.toString();
+    }
+
+    // Escape CSV fields (wrap in quotes if needed, escape inner quotes)
+    @TestVisible
+    private static String csvEscape(String val) {
+        if (val == null) return '';
+        Boolean needsQuotes = val.contains(',') || val.contains('"') || val.contains('\n') || val.contains('\r');
+        String v = val.replace('"', '""'); // escape quotes
+        if (needsQuotes) {
+            return '"' + v + '"';
+        }
+        return v;
+    }
+}
