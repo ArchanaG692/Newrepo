@@ -1,0 +1,120 @@
+<template>
+    <section class="wrap" onmouseenter={pause} onmouseleave={resume} ontouchstart={handleTouchStart}
+        ontouchend={handleTouchEnd}>
+
+        <!-- background -->
+        <div class="bg" aria-hidden="true">
+            <div class="grid"></div>
+            <div class="orb o1"></div>
+            <div class="orb o2"></div>
+            <div class="orb o3"></div>
+        </div>
+
+        <div class="shell">
+            <!-- top badge only -->
+            <div class="topBar">
+                <div class="pillTop">
+                    <span class="dot"></span>
+                    <span>{activeSlide.badge}</span>
+                </div>
+                <div class="mini">{activeSlide.miniInfo}</div>
+            </div>
+
+            <!-- viewport -->
+            <div class="viewport">
+                <div class="stage" style={stageStyle}>
+                    <template for:each={slides} for:item="s">
+                        <article key={s.id} class="slide">
+                            <!-- LEFT -->
+                            <div class="left">
+                                <!-- ✅ removed duplicate pill here -->
+
+                                <h1 class="title">
+                                    {s.title}
+                                    <span class="accent">{s.highlight}</span>
+                                </h1>
+
+                                <p class="sub">{s.subtitle}</p>
+
+                                <div class="bullets">
+                                    <template for:each={s.points} for:item="p">
+                                        <div key={p} class="b">
+                                            <span class="tick">✓</span>
+                                            <span class="bt">{p}</span>
+                                        </div>
+                                    </template>
+                                </div>
+
+                                <div class="actions">
+                                    <button class="primary" data-action={s.primaryAction} onclick={onAction}>
+                                        {s.primaryLabel}
+                                    </button>
+                                    <button class="secondary" data-action={s.secondaryAction} onclick={onAction}>
+                                        {s.secondaryLabel}
+                                    </button>
+                                </div>
+
+                                <div class="meta">
+                                    <div class="chip">{s.meta1}</div>
+                                    <div class="chip">{s.meta2}</div>
+                                    <div class="chip">{s.meta3}</div>
+                                </div>
+                            </div>
+
+                            <!-- RIGHT -->
+                            <div class="right">
+                                <div class={s.visualClass}>
+                                    <div class="halo"></div>
+
+                                    <!-- rings -->
+                                    <div class="orbitRing ring1"></div>
+                                    <div class="orbitRing ring2"></div>
+
+                                    <!-- center -->
+                                    <div class="center">
+                                        <lightning-icon icon-name={s.centerIcon} size="medium"></lightning-icon>
+                                    </div>
+
+                                    <!-- icons perfectly in circle -->
+                                    <template for:each={s.icons} for:item="i">
+                                        <div key={i.key} class="node" style={i.style} title={i.tip}>
+                                            <lightning-icon icon-name={i.icon} size="small"></lightning-icon>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </article>
+                    </template>
+                </div>
+            </div>
+
+            <!-- footer -->
+            <div class="footer">
+                <div class="controls">
+                    <button class="navBtn" onclick={prev} aria-label="Previous slide">
+                        <span class="chev">‹</span>
+                    </button>
+
+                    <div class="dots" role="tablist" aria-label="Hero slides">
+                        <template for:each={dotItems} for:item="d">
+                            <button key={d.id}
+                                class={d.cls}
+                                data-index={d.index}
+                                onclick={goTo}
+                                aria-label={d.label}>
+                            </button>
+                        </template>
+                    </div>
+
+                    <button class="navBtn" onclick={next} aria-label="Next slide">
+                        <span class="chev">›</span>
+                    </button>
+                </div>
+
+                <div class="progress" aria-hidden="true">
+                    <span class="bar" style={progressStyle}></span>
+                </div>
+            </div>
+        </div>
+    </section>
+</template>

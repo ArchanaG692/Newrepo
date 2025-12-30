@@ -1,0 +1,93 @@
+<template>
+    <section class="shell" aria-label="Enterprise Standards and Guidelines">
+        <!-- premium animated backdrop -->
+        <div class="backdrop" aria-hidden="true">
+            <div class="mesh m1"></div>
+            <div class="mesh m2"></div>
+            <div class="mesh m3"></div>
+            <div class="noise"></div>
+            <div class="grid"></div>
+        </div>
+
+        <!-- hero -->
+        <header class="hero">
+            <div class="pill">
+                <span class="dot" aria-hidden="true"></span>
+                <span>BEST PRACTICES</span>
+            </div>
+
+            <h2 class="h">
+                Enterprise Standards <span class="g">&amp; Guidelines</span>
+            </h2>
+
+            <p class="p">
+                A shared baseline to keep delivery consistent across architecture, security, automation,
+                testing, and performance.
+            </p>
+
+            <div class="stats" role="list">
+                <div class="stat" role="listitem">
+                    <div class="k">6</div>
+                    <div class="t">Domains</div>
+                </div>
+                <div class="stat" role="listitem">
+                    <div class="k">30</div>
+                    <div class="t">Key checks</div>
+                </div>
+                <div class="stat" role="listitem">
+                    <div class="k">1</div>
+                    <div class="t">Design review gate</div>
+                </div>
+            </div>
+        </header>
+
+        <!-- cards -->
+        <div class="deck" role="list">
+            <template for:each={cards} for:item="c">
+                <article key={c.key} class={c.cardClass} data-key={c.key} role="listitem">
+                    <div class="rail" aria-hidden="true">
+                        <div class="railIcon">
+                            <lightning-icon icon-name={c.icon} size="small"></lightning-icon>
+                        </div>
+                        <div class="railLine"></div>
+                    </div>
+
+                    <div class="body">
+                        <div class="topRow">
+                            <h3 class="ct">{c.title}</h3>
+                            <span class="tag">{c.tag}</span>
+                        </div>
+
+                        <p class="cd">{c.desc}</p>
+
+                        <ul class="checks">
+                            <template for:each={c.points} for:item="p">
+                                <li key={p} class="check">
+                                    <span class="tick" aria-hidden="true"></span>
+                                    <span class="txt">{p}</span>
+                                </li>
+                            </template>
+                        </ul>
+                    </div>
+
+                    <span class="sheen" aria-hidden="true"></span>
+                </article>
+            </template>
+        </div>
+
+        <!-- bottom banner -->
+        <!-- <div class="banner" role="note">
+            <div class="bIcon" aria-hidden="true">
+                <lightning-icon icon-name="utility:info" size="x-small"></lightning-icon>
+            </div>
+            <div class="bText">
+                <div class="bTitle">Before You Build</div>
+                <div class="bDesc">
+                    All new development must pass a <b>Design Review</b> (scope, security, data, and deployment plan)
+                    before implementation starts.
+                </div>
+            </div>
+            <div class="bPulse" aria-hidden="true"></div>
+        </div> -->
+    </section>
+</template>

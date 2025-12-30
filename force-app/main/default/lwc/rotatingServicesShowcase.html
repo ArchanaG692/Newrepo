@@ -1,0 +1,83 @@
+<template>
+    <section class="wrap">
+        <!-- background -->
+        <div class="bg" aria-hidden="true">
+            <div class="glow g1"></div>
+            <div class="glow g2"></div>
+            <div class="grid"></div>
+        </div>
+
+        <div class="shell">
+            <!-- LEFT CONTENT -->
+            <div class="left">
+                <div class="pill">
+                    <span class="dot"></span>
+                    <span>{active.badge}</span>
+                </div>
+
+                <h2 class="title">
+                    {active.title}
+                    <span class="accent">{active.highlight}</span>
+                </h2>
+
+                <p class="desc">{active.purpose}</p>
+
+                <div class="points">
+                    <template for:each={active.points} for:item="p">
+                        <div key={p} class="point">
+                            <span class="tick">✓</span>
+                            <span class="ptxt">{p}</span>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="meta">
+                    <div class="chip">
+                        <span class="chipLabel">Impact</span>
+                        <span class="chipValue">{active.impact}</span>
+                    </div>
+                    <div class="chip">
+                        <span class="chipLabel">Best for</span>
+                        <span class="chipValue">{active.bestFor}</span>
+                    </div>
+                </div>
+
+                <div class="hint">
+                    Tip: Click any icon on the right to switch services.
+                </div>
+            </div>
+
+            <!-- RIGHT ROTATION -->
+            <div class="right" onmouseenter={pause} onmouseleave={resume} onfocusin={pause} onfocusout={resume}>
+
+                <div class="orbitCard">
+                    <div class="center">
+                        <div class="centerLabel">Core</div>
+                        <div class="centerTitle">Platform</div>
+                    </div>
+
+                    <div class={orbitClass} style={orbitStyle}>
+                        <template for:each={services} for:item="s" for:index="i">
+                            <button
+                                key={s.id}
+                                class={s.btnClass}
+                                style={s.posStyle}
+                                type="button"
+                                data-index={i}
+                                onclick={selectService}
+                                aria-label={s.title}
+                                title={s.title}
+                            >
+                                <lightning-icon icon-name={s.icon} size="small" alternative-text={s.title}></lightning-icon>
+                            </button>
+                        </template>
+                    </div>
+
+                    <div class="ring r1"></div>
+                    <div class="ring r2"></div>
+                    <div class="ring r3"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+</template>

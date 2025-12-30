@@ -1,0 +1,89 @@
+.wrap {
+    position: relative;
+    border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid rgba(220, 232, 255, 0.95);
+    background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.92));
+}
+
+/* subtle background like official sections */
+.softBg {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(900px 220px at 50% 0%, rgba(0,140,255,0.10), transparent 60%),
+        linear-gradient(90deg, rgba(0, 140, 255, 0.04), transparent 40%, rgba(0, 140, 255, 0.04));
+    opacity: 0.9;
+    pointer-events: none;
+}
+
+.grid {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cell {
+    padding: 18px 14px 16px;
+    text-align: center;
+    border-right: 1px solid rgba(225, 236, 255, 0.9);
+    animation: popIn 700ms cubic-bezier(.2,.9,.2,1) both;
+}
+
+.cell:last-child {
+    border-right: none;
+}
+
+/* value + label */
+.value {
+    display: inline-flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 2px;
+}
+
+.num {
+    font-size: 36px;
+    font-weight: 900;
+    color: #0b76e6;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    text-shadow: 0 10px 26px rgba(11, 118, 230, 0.12);
+}
+
+.suffix {
+    font-size: 18px;
+    font-weight: 900;
+    color: #0b76e6;
+    opacity: 0.95;
+}
+
+.label {
+    margin-top: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #5b6f8b;
+    letter-spacing: 0.02em;
+}
+
+/* subtle appear */
+@keyframes popIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.99); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* responsive */
+@media (max-width: 900px) {
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cell:nth-child(2) { border-right: none; }
+    .cell:nth-child(3),
+    .cell:nth-child(4) { border-top: 1px solid rgba(225, 236, 255, 0.9); }
+}
+
+@media (max-width: 520px) {
+    .grid { grid-template-columns: 1fr; }
+    .cell { border-right: none; }
+    .cell + .cell { border-top: 1px solid rgba(225, 236, 255, 0.9); }
+    .num { font-size: 34px; }
+}

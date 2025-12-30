@@ -1,0 +1,361 @@
+:host { display:block; }
+
+/* ===============================
+   WRAP (keep, but softer border)
+================================ */
+.wrap{
+    position:relative;
+    border-radius:24px;
+    overflow:hidden;
+    border: 0;
+    background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,255,255,0.84));
+    box-shadow: 0 18px 50px rgba(16, 40, 80, 0.10);
+}
+
+/* ---------- Background ---------- */
+.bg{
+    position:absolute; inset:0;
+    pointer-events:none;
+    background:
+        radial-gradient(900px 380px at 25% 30%, rgba(0,120,255,0.12), transparent 55%),
+        radial-gradient(900px 380px at 80% 60%, rgba(130,80,255,0.10), transparent 60%);
+}
+
+.glow{
+    position:absolute;
+    width:520px; height:520px; border-radius:50%;
+    filter: blur(46px);
+    opacity:0.28;
+}
+.g1{ left:-140px; top:-140px; background: rgba(0,140,255,0.45); }
+.g2{ right:-160px; bottom:-160px; background: rgba(140,90,255,0.42); }
+
+.grid{
+    position:absolute; inset:-2px;
+    opacity:0.18;
+    background-image:
+      linear-gradient(to right, rgba(90,110,140,0.18) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(90,110,140,0.18) 1px, transparent 1px);
+    background-size: 52px 52px;
+    mask-image: radial-gradient(circle at 40% 50%, rgba(0,0,0,1), rgba(0,0,0,0.15) 66%, rgba(0,0,0,0));
+}
+
+/* ===============================
+   LAYOUT
+================================ */
+.shell{
+    position:relative;
+    z-index:1;
+    display:grid;
+    grid-template-columns: 1.12fr 0.88fr;
+    gap:18px;
+    padding:24px;
+    align-items:center;
+}
+
+/* ===============================
+   LEFT (remove boxy card look)
+================================ */
+.left{
+    /* glass surface instead of card box */
+    background: linear-gradient(180deg, rgba(255,255,255,0.62), rgba(255,255,255,0.42));
+    border: 0;
+    border-radius: 22px;
+    padding: 22px 22px 20px;
+    box-shadow: 0 14px 34px rgba(20,50,90,0.08);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    position: relative;
+    overflow: hidden;
+
+    transform: translateY(0);
+    opacity:1;
+    transition: transform .35s ease, opacity .35s ease;
+}
+
+/* soft inner highlight (not a border) */
+.left::before{
+    content:"";
+    position:absolute;
+    inset: 1px;
+    border-radius: 21px;
+    background: radial-gradient(800px 220px at 20% 0%, rgba(0,140,255,0.10), transparent 60%),
+                radial-gradient(800px 220px at 90% 100%, rgba(140,90,255,0.09), transparent 60%);
+    pointer-events:none;
+    opacity:0.9;
+}
+
+.left > *{ position: relative; z-index: 1; }
+
+.left.swap{
+    animation: swapIn .38s ease both;
+}
+@keyframes swapIn{
+    from{ opacity:0; transform: translateY(10px); }
+    to{ opacity:1; transform: translateY(0); }
+}
+
+/* pill */
+.pill{
+    display:inline-flex;
+    align-items:center;
+    gap:10px;
+    padding:8px 12px;
+    border-radius:999px;
+    background: rgba(255,255,255,0.72);
+    border: 1px solid rgba(180,205,255,0.55);
+    font-weight:700;
+    font-size:12px;
+    letter-spacing:0.4px;
+    color:#123a70;
+    box-shadow: 0 10px 24px rgba(20,50,90,0.06);
+}
+.dot{
+    width:8px; height:8px; border-radius:50%;
+    background: rgba(0,140,255,0.95);
+    box-shadow: 0 0 0 4px rgba(0,140,255,0.12);
+}
+
+.title{
+    margin:12px 0 8px;
+    font-size:28px;
+    line-height:1.15;
+    color:#0b1f3a;
+    font-weight:900;
+}
+.accent{
+    display:inline-block;
+    margin-left:8px;
+    background: linear-gradient(90deg, rgba(0,140,255,1), rgba(140,90,255,1));
+    -webkit-background-clip:text;
+    background-clip:text;
+    color:transparent;
+}
+
+.desc{
+    margin:0 0 14px;
+    color:#2b3b55;
+    font-size:14px;
+    line-height:1.6;
+}
+
+/* ✅ Soft list (no boxes) */
+.points{
+    display:grid;
+    gap:10px;
+    margin: 14px 0 16px;
+}
+.point{
+    display:flex;
+    gap:10px;
+    align-items:flex-start;
+    padding:10px 2px;
+    border-radius: 0;
+    background: transparent;
+    border: none;
+    border-bottom: 1px dashed rgba(180,205,255,0.60);
+}
+.points .point:last-child{
+    border-bottom:none;
+}
+
+.tick{
+    width:22px; height:22px;
+    border-radius:999px; /* circular */
+    display:grid;
+    place-items:center;
+    background: rgba(0,140,255,0.12);
+    color:#0b5fb8;
+    font-weight:900;
+    flex:0 0 auto;
+}
+.ptxt{
+    color:#1f2f4a;
+    font-size:13.6px;
+    line-height:1.45;
+}
+
+/* chips -> pill chips (less boxy) */
+.meta{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-top: 10px;
+}
+.chip{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    padding:8px 12px;
+    border-radius:999px;
+    background: rgba(255,255,255,0.70);
+    border: 1px solid rgba(200,220,255,0.55);
+    box-shadow: 0 10px 22px rgba(20,50,90,0.05);
+}
+.chipLabel{ font-size:11px; color:#47607f; font-weight:800; }
+.chipValue{ font-size:11px; color:#0b1f3a; font-weight:900; }
+
+.hint{
+    margin-top:14px;
+    font-size:12px;
+    color:#5a6c86;
+}
+
+/* ===============================
+   RIGHT (remove boxed orbit card)
+================================ */
+.right{
+    display:grid;
+    place-items:center;
+}
+
+.orbitCard{
+    position:relative;
+    width: 340px;
+    height: 340px;
+    border-radius: 28px;
+
+    /* glass stage */
+    background: linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.30));
+    border: 0;
+    box-shadow: 0 20px 46px rgba(20,50,90,0.10);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+
+    display:grid;
+    place-items:center;
+    overflow:hidden;
+}
+
+/* subtle highlight rim without "box border" */
+.orbitCard::before{
+    content:"";
+    position:absolute;
+    inset: 1px;
+    border-radius: 27px;
+    background:
+      radial-gradient(900px 260px at 50% 0%, rgba(0,140,255,0.10), transparent 65%),
+      radial-gradient(900px 260px at 100% 100%, rgba(140,90,255,0.09), transparent 65%);
+    pointer-events:none;
+    opacity: 0.9;
+}
+
+.center{
+    width:150px; height:150px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.72);
+    border: 1px solid rgba(200,220,255,0.55);
+    display:grid;
+    place-items:center;
+    box-shadow: 0 16px 36px rgba(10,30,60,0.08);
+    z-index:3;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.centerLabel{
+    font-size:12px;
+    color:#5a6c86;
+    font-weight:800;
+    margin-top:10px;
+}
+.centerTitle{
+    font-size:22px;
+    color:#0b1f3a;
+    font-weight:900;
+    margin-bottom:12px;
+}
+
+/* Rings -> very soft, no harsh lines */
+.ring{
+    position:absolute;
+    border-radius:50%;
+    border: 1px solid rgba(160,195,255,0.26);
+    opacity:0.70;
+}
+.r1{ width:250px; height:250px; }
+.r2{ width:290px; height:290px; opacity:0.42; }
+.r3{ width:320px; height:320px; opacity:0.22; }
+
+/* Orbit */
+.orbit{
+    position:absolute;
+    left:50%;
+    top:50%;
+    width:0;
+    height:0;
+    z-index:4;
+    transform: translate(-50%, -50%);
+    transform-origin:center;
+    animation: spin linear infinite;
+}
+.orbit.paused{ animation-play-state: paused; }
+
+@keyframes spin{
+    from{ transform: translate(-50%, -50%) rotate(0deg); }
+    to{ transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+/* ===============================
+   NODES (remove square tiles)
+================================ */
+.node{
+    position:absolute;
+    left:50%;
+    top:50%;
+
+    /* smaller + circular/pill */
+    width: 52px;
+    height: 52px;
+    border-radius: 999px;
+
+    border: 1px solid rgba(200,220,255,0.45);
+    background: rgba(255,255,255,0.72);
+    box-shadow: 0 12px 26px rgba(20,50,90,0.08);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+
+    display:grid;
+    place-items:center;
+    cursor:pointer;
+    outline:none;
+
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, filter .18s ease;
+
+    transform: translate(-50%, -50%) translate(var(--x), var(--y));
+}
+
+.node:hover{
+    box-shadow: 0 16px 34px rgba(20,50,90,0.14);
+    transform: translate(-50%, -50%) translate(var(--x), var(--y)) scale(1.05);
+}
+
+.node.active{
+    border-color: rgba(0,140,255,0.75);
+    box-shadow: 0 20px 44px rgba(0,140,255,0.16);
+    transform: translate(-50%, -50%) translate(var(--x), var(--y)) scale(1.10);
+}
+
+/* active halo (no box) */
+.node.active::after{
+    content:"";
+    position:absolute;
+    inset:-10px;
+    border-radius:999px;
+    background: radial-gradient(circle, rgba(0,140,255,0.22), transparent 62%);
+    pointer-events:none;
+}
+
+/* icon */
+.node lightning-icon{
+    --slds-c-icon-color-foreground-default: #3a4b65;
+}
+
+/* ===============================
+   RESPONSIVE
+================================ */
+@media (max-width: 960px){
+    .shell{ grid-template-columns: 1fr; }
+    .orbitCard{ width: 320px; height: 320px; margin: 0 auto 10px; }
+    .title{ font-size: 24px; }
+}

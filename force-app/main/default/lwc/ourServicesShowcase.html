@@ -1,0 +1,48 @@
+<template>
+    <section class="wrap">
+        <!-- Animated background -->
+        <div class="bg" aria-hidden="true">
+            <span class="blob b1"></span>
+            <span class="blob b2"></span>
+            <span class="blob b3"></span>
+            <span class="gridGlow"></span>
+        </div>
+
+        <!-- Header -->
+        <header class="hero">
+            <h2 class="title">
+                Comprehensive Platform<br />
+                <span class="accent">Services &amp; Support</span>
+            </h2>
+
+            <p class="subtitle">
+                From design consultations to release management, we provide end-to-end support
+                for developers, administrators, and leadership across your Salesforce platform.
+            </p>
+        </header>
+
+        <!-- Cards -->
+        <div class="cards" role="list">
+            <template for:each={services} for:item="svc" for:index="idx">
+                <article key={svc.key} class={svc.cardClass} role="listitem" data-idx={idx} data-key={svc.key}
+                    onmousemove={handleTilt} onmouseleave={resetTilt}>
+                    <div class="shine" aria-hidden="true"></div>
+
+                    <div class="iconWrap">
+                        <span class="iconBg" aria-hidden="true"></span>
+                        <lightning-icon icon-name={svc.icon} size="small" class="icn"></lightning-icon>
+                    </div>
+
+                    <h3 class="cardTitle">{svc.title}</h3>
+                    <p class="cardDesc">{svc.desc}</p>
+
+                    <div class="meta">
+                        <span class="pill">{svc.tag}</span>
+                        <span class="dot" aria-hidden="true"></span>
+                        <span class="small">{svc.small}</span>
+                    </div>
+                </article>
+            </template>
+        </div>
+    </section>
+</template>

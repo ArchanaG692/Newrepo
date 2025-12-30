@@ -1,0 +1,32 @@
+<template>
+    <section class="section">
+        <div class="bgGrid"></div>
+        <div class="orb orb1"></div>
+        <div class="orb orb2"></div>
+
+        <header class="header">
+            <h2 class="h2">Supported Applications</h2>
+            <p class="sub">Enterprise platforms we actively support and manage</p>
+        </header>
+
+        <div class="grid" role="list">
+            <template for:each={cards} for:item="c">
+                <article key={c.key} class={c.cardClass} role="listitem" style={c.style}>
+                    <span class="accentBar" aria-hidden="true"></span>
+
+                    <div class="top">
+                        <div class="iconWrap" aria-hidden="true">
+                            <lightning-icon icon-name={c.icon} size="small"></lightning-icon>
+                        </div>
+                        <div class="name">{c.title}</div>
+                    </div>
+
+                    <div class="desc">{c.desc}</div>
+
+                    <span class="shine" aria-hidden="true"></span>
+                    <span class="ring" aria-hidden="true"></span>
+                </article>
+            </template>
+        </div>
+    </section>
+</template>

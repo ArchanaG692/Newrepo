@@ -1,0 +1,53 @@
+<template>
+    <section class="wrap">
+        <!-- soft animated background -->
+        <div class="bg" aria-hidden="true">
+            <div class="grid"></div>
+            <span class="orb o1"></span>
+            <span class="orb o2"></span>
+            <span class="orb o3"></span>
+        </div>
+
+        <header class="head">
+            <span class="pill">RESOURCES</span>
+
+            <h2 class="title">
+                Everything You Need<br />
+                <span class="accent">to Succeed</span>
+            </h2>
+
+            <p class="sub">
+                Self-service resources to help you get the most out of your Salesforce platform.
+            </p>
+        </header>
+
+        <div class="cards" role="list">
+            <template for:each={resources} for:item="r" for:index="i">
+                <article key={r.key} class="card" role="listitem" style={r.delayStyle} data-reveal>
+                    <div class="top">
+                        <div class="icon">
+                            <lightning-icon icon-name={r.icon} size="small"></lightning-icon>
+                        </div>
+                        <h3 class="name">{r.title}</h3>
+                    </div>
+
+                    <p class="desc">{r.desc}</p>
+
+                    <ul class="points">
+                        <template for:each={r.points} for:item="p">
+                            <li key={p} class="point">{p}</li>
+                        </template>
+                    </ul>
+
+                    <a class="cta" href={r.href} target="_blank" rel="noopener">
+                        {r.cta}
+                        <span class="arrow" aria-hidden="true">↗</span>
+                    </a>
+
+                    <span class="shine" aria-hidden="true"></span>
+                    <span class="border" aria-hidden="true"></span>
+                </article>
+            </template>
+        </div>
+    </section>
+</template>

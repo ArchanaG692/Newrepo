@@ -1,0 +1,16 @@
+<template>
+    <section class="wrap">
+        <div class="softBg"></div>
+
+        <div class="grid" role="list">
+            <template for:each={stats} for:item="s">
+                <div key={s.key} class="cell" role="listitem">
+                    <div class="value">
+                        <span class="num">{s.display}</span><span class="suffix">{s.suffix}</span>
+                    </div>
+                    <div class="label">{s.label}</div>
+                </div>
+            </template>
+        </div>
+    </section>
+</template>

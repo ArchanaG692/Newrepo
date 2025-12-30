@@ -1,0 +1,130 @@
+<template>
+    <section class="wrap" role="region" aria-label="Services">
+        <div class="bg" aria-hidden="true">
+            <span class="orb o1"></span>
+            <span class="orb o2"></span>
+            <span class="orb o3"></span>
+            <span class="grid"></span>
+            <span class="spark s1"></span>
+            <span class="spark s2"></span>
+            <span class="spark s3"></span>
+        </div>
+
+        <div class="shell">
+            <header class="head">
+                <div class="kicker">
+                    <span class="dot"></span>
+                    <span class="kTxt">OUR SERVICES</span>
+                </div>
+
+                <h2 class="title">
+                    Reliable delivery across
+                    <span class="accent"> platform, process, and quality</span>
+                </h2>
+
+                <p class="sub">
+                    Choose a service to see purpose, key outcomes, and what your team gets — built for enterprise execution.
+                </p>
+            </header>
+
+            <div class="layout">
+                <!-- LEFT -->
+                <aside class="rail" aria-label="Service list"
+                       onmouseenter={pauseAuto}
+                       onmouseleave={resumeAuto}>
+                    <div class="railCard">
+                        <template for:each={services} for:item="s">
+                            <button
+                                key={s.key}
+                                class={s.btnClass}
+                                data-key={s.key}
+                                onclick={handleSelect}
+                                type="button"
+                            >
+                                <span class="ic" aria-hidden="true">
+                                    <lightning-icon icon-name={s.icon} size="x-small"></lightning-icon>
+                                </span>
+
+                                <span class="tWrap">
+                                    <span class="t1">{s.title}</span>
+                                    <span class="t2">{s.short}</span>
+                                </span>
+
+                                <span class="chev" aria-hidden="true">›</span>
+                            </button>
+                        </template>
+                    </div>
+
+                    <!-- <div class="miniNote">
+                        <span class="pulse" aria-hidden="true"></span>
+                        <span>Auto-rotates every 10s • Mobile friendly • Smooth UI</span>
+                    </div> -->
+                </aside>
+
+                <!-- RIGHT -->
+                <article class="panel" aria-label="Service details">
+                    <div class="panelTop">
+                        <div class="badge">
+                            <span class="bDot"></span>
+                            <span>{active.badge}</span>
+                        </div>
+
+                        <div class="heroLine">
+                            <h3 class="pTitle">{active.title}</h3>
+                            <div class="chipRow">
+                                <template for:each={active.chips} for:item="c">
+                                    <span key={c} class="chip">{c}</span>
+                                </template>
+                            </div>
+                        </div>
+
+                        <p class="purpose">{active.purpose}</p>
+                    </div>
+
+                    <div class="cards">
+                        <div class="card">
+                            <div class="cHead">
+                                <span class="cIcon" aria-hidden="true">
+                                    <lightning-icon icon-name="utility:check" size="x-small"></lightning-icon>
+                                </span>
+                                <span class="cTitle">What you get</span>
+                            </div>
+
+                            <ul class="list">
+                                <template for:each={active.deliverables} for:item="d">
+                                    <li key={d} class="li">
+                                        <span class="tick" aria-hidden="true">✓</span>
+                                        <span>{d}</span>
+                                    </li>
+                                </template>
+                            </ul>
+                        </div>
+
+                        <div class="card">
+                            <div class="cHead">
+                                <span class="cIcon" aria-hidden="true">
+                                    <lightning-icon icon-name="utility:trend" size="x-small"></lightning-icon>
+                                </span>
+                                <span class="cTitle">Outcomes</span>
+                            </div>
+
+                            <ul class="list">
+                                <template for:each={active.outcomes} for:item="o">
+                                    <li key={o} class="li">
+                                        <span class="tick alt" aria-hidden="true">•</span>
+                                        <span>{o}</span>
+                                    </li>
+                                </template>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="footerBar" aria-hidden="true">
+                        <span class="scan"></span>
+                        <span class="glowLine"></span>
+                    </div>
+                </article>
+            </div>
+        </div>
+    </section>
+</template>
