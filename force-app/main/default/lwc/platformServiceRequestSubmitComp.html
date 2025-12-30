@@ -1,0 +1,233 @@
+<template>
+    <section class="page">
+        <div class="bg" aria-hidden="true">
+            <div class="bgGrid"></div>
+            <div class="orb orb1"></div>
+            <div class="orb orb2"></div>
+            <div class="orb orb3"></div>
+        </div>
+
+        <div class="container">
+            <header class="hero">
+                <div class="miniTag">SUBMIT A REQUEST</div>
+                <h1 class="heroTitle">Platform Service <span class="heroAccent">Request Portal</span></h1>
+                <p class="heroSub">
+                    Pick a request type. Read the guidance on the left page and fill the form on the right page.
+                </p>
+            </header>
+
+            <div class="selector">
+                <button type="button" class={designCardClass} onclick={selectDesign}>
+                    <span class="selIcon">🧩</span>
+                    <span class="selText">
+                        <span class="selTitle">Design Review</span>
+                        <span class="selSub">Architecture / UI-UX / Technical review.</span>
+                    </span>
+                </button>
+
+                <button type="button" class={dataCardClass} onclick={selectData}>
+                    <span class="selIcon">🗂️</span>
+                    <span class="selText">
+                        <span class="selTitle">Data Model</span>
+                        <span class="selSub">Objects, fields, relationships, picklists.</span>
+                    </span>
+                </button>
+
+                <button type="button" class={releaseCardClass} onclick={selectRelease}>
+                    <span class="selIcon">🚀</span>
+                    <span class="selText">
+                        <span class="selTitle">Release Request</span>
+                        <span class="selSub">Promote changes to higher environments.</span>
+                    </span>
+                </button>
+            </div>
+
+            <div class="book">
+                <!-- Left Page -->
+                <aside class="pageLeft">
+                    <div class="pageHeader">
+                        <div class="pageBadge">{activeLabel}</div>
+                        <div class="pageMini">Purpose • Guidance • Checklist</div>
+                    </div>
+
+                    <div class="pageBody">
+                        <div class="block">
+                            <div class="blockTitle"><span class="dot" aria-hidden="true"></span> Purpose</div>
+                            <p class="leftDesc">{leftPurpose}</p>
+                        </div>
+
+                        <div class="block">
+                            <div class="blockTitle"><span class="dot" aria-hidden="true"></span> What you will get</div>
+                            <p class="leftDesc">{leftOutcome}</p>
+                            <div class="pillRow">
+                                <template for:each={leftHighlights} for:item="h">
+                                    <span key={h} class="pill">{h}</span>
+                                </template>
+                            </div>
+                        </div>
+
+                        <div class="cardNote">
+                            <div class="noteDot" aria-hidden="true"></div>
+                            <div class="noteText">
+                                <div class="noteTitle">Tip</div>
+                                <div class="noteSub">{leftTip}</div>
+                            </div>
+                        </div>
+
+                        <div class="listBox">
+                            <div class="listTitle">Include these details</div>
+                            <ul class="list">
+                                <template for:each={leftChecklist} for:item="item">
+                                    <li key={item} class="li">{item}</li>
+                                </template>
+                            </ul>
+                        </div>
+
+                        <div class="exampleBox">
+                            <div class="exTitle">Example request (good quality)</div>
+                            <div class="exText">{leftExample}</div>
+                        </div>
+
+                        <div class="divider"></div>
+
+                        <div class="block">
+                            <div class="blockTitle"><span class="dot" aria-hidden="true"></span> What happens next</div>
+                            <ol class="steps">
+                                <template for:each={leftSteps} for:item="s">
+                                    <li key={s.title} class="step">
+                                        <div class="stepNum">{s.num}</div>
+                                        <div class="stepBody">
+                                            <div class="stepTitle">{s.title}</div>
+                                            <div class="stepSub">{s.sub}</div>
+                                        </div>
+                                    </li>
+                                </template>
+                            </ol>
+                        </div>
+                    </div>
+                </aside>
+
+                <!-- Center spine -->
+                <div class="spine" aria-hidden="true">
+                    <div class="spineLine"></div>
+                    <div class="spineGlow"></div>
+                </div>
+
+                <!-- Right Page (Form) -->
+                <section class="pageRight">
+                    <div class="pageHeader">
+                        <div class="pageBadge">Request Form</div>
+                        <div class="pageMini">Fill all required fields</div>
+                    </div>
+
+                    <div class="pageBody">
+                        <template if:true={ready}>
+                            <div class="grid2 fadeIn">
+                                <template for:each={fields} for:item="f">
+                                    <div key={f.apiName} class={f.wrapClass}>
+                                        <label class="label">
+                                            {f.label}
+                                            <template if:true={f.required}><span class="req">*</span></template>
+                                        </label>
+
+                                        <template if:true={f.isPicklist}>
+                                            <lightning-combobox
+                                                data-api={f.apiName}
+                                                value={f.value}
+                                                placeholder={f.placeholder}
+                                                options={f.options}
+                                                variant="label-hidden"
+                                                required={f.required}
+                                                onchange={handleChange}>
+                                            </lightning-combobox>
+                                        </template>
+
+                                        <template if:true={f.isTextarea}>
+                                            <lightning-textarea
+                                                data-api={f.apiName}
+                                                value={f.value}
+                                                placeholder={f.placeholder}
+                                                variant="label-hidden"
+                                                required={f.required}
+                                                onchange={handleChange}>
+                                            </lightning-textarea>
+                                        </template>
+
+                                        <template if:true={f.isInput}>
+                                            <lightning-input
+                                                data-api={f.apiName}
+                                                type={f.inputType}
+                                                value={f.value}
+                                                placeholder={f.placeholder}
+                                                variant="label-hidden"
+                                                required={f.required}
+                                                onchange={handleChange}>
+                                            </lightning-input>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+
+                            <!-- ✅ Attachments section (shows after record is created) -->
+                            <div class="attachBox">
+                                <div class="attachHead">
+                                    <div class="attachTitle">Attach Documents</div>
+                                    <div class="attachHint">Max 3MB each • Max 12MB total</div>
+                                </div>
+
+                                <template if:false={requestId}>
+                                    <div class="attachInfo">
+                                        Click <b>Create Request</b> first to generate the record. Then you can upload images here.
+                                    </div>
+                                </template>
+
+                                <template if:true={requestId}>
+                                    <lightning-file-upload
+                                        label="Upload Images"
+                                        name="platformRequestFiles"
+                                        record-id={requestId}
+                                        accept={acceptedFormats}
+                                        multiple
+                                        onuploadfinished={handleUploadFinished}>
+                                    </lightning-file-upload>
+
+                                    <template if:true={hasUploads}>
+                                        <div class="uploadedPills">
+                                            <template for:each={uploadedNames} for:item="n">
+                                                <span key={n} class="uploadPill">{n}</span>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </template>
+                            </div>
+
+                            <div class="footer">
+                                <template if:false={requestId}>
+                                    <button class="submitBtn" type="button" onclick={createRequest} disabled={submitting}>
+                                        <span>Create Request</span>
+                                        <span class="btnArrow" aria-hidden="true">→</span>
+                                    </button>
+                                </template>
+
+                                <template if:true={requestId}>
+                                    <button class="submitBtn" type="button" onclick={finalSubmit} disabled={submitting}>
+                                        <span>Final Submit (Send Email)</span>
+                                        <span class="btnArrow" aria-hidden="true">→</span>
+                                    </button>
+                                </template>
+                            </div>
+                        </template>
+
+                        <template if:false={ready}>
+                            <div class="loading">
+                                <div class="shimmer"></div>
+                                <div class="shimmer"></div>
+                                <div class="shimmer"></div>
+                            </div>
+                        </template>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </section>
+</template>
