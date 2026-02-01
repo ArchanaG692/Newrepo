@@ -18,8 +18,8 @@ global class Demo {  // Violates AvoidGlobalModifier
             if (value > 10) {
                 if (value > 20) {
                     if (value > 30) {
-                        System.debug('Too much nesting Test');
-                        System.debug('Try1111111');
+                        System.debug('Too much nesting Test1');
+                        System.debug('Try111111111');
                     }
                 }
 
