@@ -12,8 +12,7 @@ permissions:
 
 jobs:
   cherry_pick_and_push_to_feature:
-    # Only when PR is from dev -> feature/*
-    if: startsWith(github.base_ref, 'feature/') && github.head_ref == 'dev'
+    if: startsWith(github.event.pull_request.base.ref, 'feature-') && github.event.pull_request.head.ref == 'dev'
     runs-on: ubuntu-latest
 
     steps:
