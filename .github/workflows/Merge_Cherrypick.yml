@@ -29,70 +29,67 @@ jobs:
       #
       # If not present, it will fall back to SCANNED_SHA (latest) so the pipeline still works.
       - name: Get PR number + commit list (from PR body)
+        id: prinfo
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          RUN_ID: ${{ env.RUN_ID }}
-          SCANNED_SHA: ${{ env.SCANNED_SHA }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          SCANNED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
 
           PR_NUMBER=$(gh api "repos/$REPO/actions/runs/$RUN_ID" --jq '.pull_requests[0].number')
           if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
-            echo "ERROR: No PR associated with this workflow_run. Cannot determine commit list."
+            echo "ERROR: No PR associated with this workflow run."
+            echo "This workflow_run only works when code-scan was triggered by a PR."
             exit 1
           fi
+
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
           BODY=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq '.body // ""')
 
-          COMMITS=$(python3 - << 'PY'
+          echo "----- PR BODY -----"
+          echo "$BODY"
+          echo "-------------------"
+
+          COMMITS=$(python3 - <<PY
           import re, os
           body = os.environ.get("BODY","")
           scanned = os.environ.get("SCANNED_SHA","").strip()
           
           commits = []
           
-          # Same-line: CHERRY_PICK_COMMITS: sha1 sha2
-          m = re.search(r'CHERRY_PICK_COMMITS\s*:\s*(.*)', body, re.IGNORECASE)
+          m = re.search(r'CHERRY_PICK_COMMITS\\s*:\\s*(.*)', body, re.IGNORECASE)
           if m:
-              commits = re.findall(r'\b[0-9a-f]{7,40}\b', m.group(1))
+              commits = re.findall(r'\\b[0-9a-f]{7,40}\\b', m.group(1))
           else:
-              # Multiline:
-              # CHERRY_PICK_COMMITS:
-              # sha1
-              # sha2
-              m2 = re.search(r'CHERRY_PICK_COMMITS\s*:\s*\n([\s\S]+?)(\n\s*\n|$)', body, re.IGNORECASE)
+              m2 = re.search(r'CHERRY_PICK_COMMITS\\s*:\\s*\\n([\\s\\S]+?)(\\n\\s*\\n|$)', body, re.IGNORECASE)
               if m2:
-                  commits = re.findall(r'\b[0-9a-f]{7,40}\b', m2.group(1))
+                  commits = re.findall(r'\\b[0-9a-f]{7,40}\\b', m2.group(1))
           
           # Fallback to scanned sha (latest) if nothing provided
           if not commits and scanned:
               commits = [scanned]
           
-          print(" ".join(commits))
+          prINT11(" ".join(commits))
           PY
           )
 
           if [ -z "$COMMITS" ]; then
-            echo "ERROR: No commits could be determined (no CHERRY_PICK_COMMITS and no SCANNED_SHA)."
+            echo "ERROR: No commits found to cherry-pick."
             exit 1
           fi
 
           echo "COMMITS=$COMMITS" >> $GITHUB_ENV
           echo "Selected commits: $COMMITS"
 
-        env:
-          BODY: ${{ steps.prinfo.outputs.body }}
-          # NOTE: BODY is passed via env below, GitHub doesn't allow setting steps.prinfo here,
-          # so we pass BODY directly from the command above:
-          # (This env block is overridden by the run itself; kept for clarity.)
-
-      # 2) Checkout INT
-      - name: Checkout INT
+      # 2) Checkout INT11
+      - name: Checkout INT11
         uses: actions/checkout@v4
         with:
-          ref: INT
+          ref: INT11
           fetch-depth: 0
 
       - name: Configure git
@@ -107,14 +104,14 @@ jobs:
             +refs/heads/*:refs/remotes/origin/* \
             +refs/pull/*/head:refs/remotes/origin/pull/*
 
-      # 4) Create temp branch from INT
-      - name: Create temp branch from INT
+      # 4) Create temp branch from INT11
+      - name: Create temp branch from INT11
         run: |
-          git checkout -b "$TEMP_BRANCH" "origin/INT"
+          git checkout -b "$TEMP_BRANCH" "origin/INT11"
 
       # 5) Cherry-pick selected commits with marker-based conflict strategy:
       # - If conflict occurs, we DO NOT try to auto-merge the whole file.
-      # - We keep INT version as base and replace ONLY the block between:
+      # - We keep INT11 version as base and replace ONLY the block between:
       #     // CP_START
       #     ...
       #     // CP_END
@@ -123,11 +120,6 @@ jobs:
       # IMPORTANT:
       #   Add the markers to your Apex (or other) files around the "few specific lines"
       #   that must always come from SOURCE.
-      #
-      #   Example in Demo.cls:
-      #     // CP_START
-      #     System.debug('my new message');
-      #     // CP_END
       #
       # Configure which files to apply this selective strategy to in FILES array.
       - name: Cherry-pick commits (selective conflict resolution via CP markers)
@@ -139,7 +131,7 @@ jobs:
           # List of files where you want the selective "CP block" strategy.
           # Add more files as needed.
           FILES=(
-            "force-app/main/default/classes/Demo.cls"
+            "force-app/main/default/classes/AccountClass.cls"
           )
 
           apply_cp_blocks() {
@@ -157,11 +149,11 @@ jobs:
 
               # Ensure target file exists in current branch
               if [ ! -f "$f" ]; then
-                echo "ERROR: Target file $f does not exist on INT branch state."
+                echo "ERROR: Target file $f does not exist on INT11 branch state."
                 exit 1
               fi
 
-              python3 - << 'PY' "$f" "/tmp/srcfiles/$(basename "$f")"
+              python3 - "$f" "/tmp/srcfiles/$(basename "$f")" <<'PY'
               import re, sys, pathlib
               
               target_path = pathlib.Path(sys.argv[1])
@@ -178,23 +170,23 @@ jobs:
               tgt_blocks = pattern.findall(target)
               
               if not src_blocks:
-                raise SystemExit(f"No CP_START/CP_END block found in SOURCE file: {source_path}")
+                  raise SystemExit(f"No CP_START/CP_END block found in SOURCE file: {source_path}")
               if not tgt_blocks:
-                raise SystemExit(f"No CP_START/CP_END block found in TARGET file: {target_path}")
+                  raise SystemExit(f"No CP_START/CP_END block found in TARGET file: {target_path}")
               if len(src_blocks) != len(tgt_blocks):
-                raise SystemExit(f"Mismatch: SOURCE has {len(src_blocks)} CP block(s), TARGET has {len(tgt_blocks)}")
+                  raise SystemExit(f"Mismatch: SOURCE has {len(src_blocks)} CP block(s), TARGET has {len(tgt_blocks)}")
               
               new_target = target
               for old, new in zip(tgt_blocks, src_blocks):
-                new_target = new_target.replace(old, new, 1)
+                  new_target = new_target.replace(old, new, 1)
               
               target_path.write_text(new_target, encoding="utf-8")
-              print(f"Replaced {len(src_blocks)} CP block(s) in {target_path}")
+              prINT11(f"Replaced {len(src_blocks)} CP block(s) in {target_path}")
               PY
             done
 
             git add "${FILES[@]}"
-            git commit -m "Apply CP blocks from ${sha} onto INT"
+            git commit -m "Apply CP blocks from ${sha} onto INT11"
           }
 
           # Cherry-pick commits in order. If a cherry-pick conflicts:
@@ -216,15 +208,16 @@ jobs:
         run: |
           git push origin "$TEMP_BRANCH" --force
 
-      - name: Create PR from temp branch to INT
+      - name: Create PR from temp branch to INT11
         id: cpr
         uses: actions/github-script@v7
         with:
           script: |
             const { owner, repo } = context.repo;
             const head = process.env.TEMP_BRANCH;
-            const base = "INT";
+            const base = "INT11";
 
+            // Avoid duplicate PRs if re-run
             const existing = await github.rest.pulls.list({
               owner, repo, state: "open", head: `${owner}:${head}`, base
             });
@@ -237,12 +230,13 @@ jobs:
             }
 
             const commits = (process.env.COMMITS || "").split(" ").filter(Boolean);
+
             const pr = await github.rest.pulls.create({
               owner,
               repo,
               head,
               base,
-              title: `Cherry-pick selected commits into INT`,
+              title: `Cherry-pick selected commits INT11o INT11`,
               body: [
                 `Automated cherry-pick from PR #${process.env.PR_NUMBER}`,
                 ``,
@@ -251,7 +245,7 @@ jobs:
                 ``,
                 `Conflict strategy (if conflicts occur):`,
                 `- Inside // CP_START .. // CP_END blocks: SOURCE (commit) wins`,
-                `- Outside those blocks: TARGET (INT) wins`
+                `- Outside those blocks: TARGET (INT11) wins`
               ].join("\n")
             });
 
@@ -266,8 +260,11 @@ jobs:
             const prNumber = Number("${{ steps.cpr.outputs.pr_number }}");
 
             const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+
+            // Ensure the head is still our temp branch HEAD (extra safety)
             const expectedHead = pr.data.head.sha;
 
+            // SHA-locked merge so nothing changes mid-flight
             await github.graphql(`
               mutation($prId: ID!, $expected: GitObjectID!) {
                 mergePullRequest(input: {
