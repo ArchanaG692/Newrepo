@@ -142,33 +142,33 @@ jobs:
               fi
 
               python3 -c '
-              import re, sys, pathlib
-              
-              target_path = pathlib.Path(sys.argv[1])
-              source_path = pathlib.Path(sys.argv[2])
-              
-              target = target_path.read_text(encoding="utf-8", errors="replace")
-              source = source_path.read_text(encoding="utf-8", errors="replace")
-              
-              pat = re.compile(r"(//\s*CP_START[\\s\\S]*?//\s*CP_END)", re.DOTALL)
-              
-              t_blocks = pat.findall(target)
-              s_blocks = pat.findall(source)
-              
-              if not t_blocks:
-                  raise SystemExit(f"No CP block found in TARGET {target_path}")
-              if not s_blocks:
-                  raise SystemExit(f"No CP block found in SOURCE {source_path}")
-              if len(t_blocks) != len(s_blocks):
-                  raise SystemExit(f"CP block count mismatch TARGET={len(t_blocks)} SOURCE={len(s_blocks)}")
-              
-              new_target = target
-              for old, new in zip(t_blocks, s_blocks):
-                  new_target = new_target.replace(old, new, 1)
-              
-              target_path.write_text(new_target, encoding="utf-8")
-              print(f"Replaced {len(s_blocks)} CP block(s) in {target_path}")
-              ' "$f" "/tmp/srcfiles/$(basename "$f")"
+          import re, sys, pathlib
+          
+          target_path = pathlib.Path(sys.argv[1])
+          source_path = pathlib.Path(sys.argv[2])
+          
+          target = target_path.read_text(encoding="utf-8", errors="replace")
+          source = source_path.read_text(encoding="utf-8", errors="replace")
+          
+          pat = re.compile(r"(//\s*CP_START[\\s\\S]*?//\s*CP_END)", re.DOTALL)
+          
+          t_blocks = pat.findall(target)
+          s_blocks = pat.findall(source)
+          
+          if not t_blocks:
+              raise SystemExit(f"No CP block found in TARGET {target_path}")
+          if not s_blocks:
+              raise SystemExit(f"No CP block found in SOURCE {source_path}")
+          if len(t_blocks) != len(s_blocks):
+              raise SystemExit(f"CP block count mismatch TARGET={len(t_blocks)} SOURCE={len(s_blocks)}")
+          
+          new_target = target
+          for old, new in zip(t_blocks, s_blocks):
+              new_target = new_target.replace(old, new, 1)
+          
+          target_path.write_text(new_target, encoding="utf-8")
+          print(f"Replaced {len(s_blocks)} CP block(s) in {target_path}")
+          ' "$f" "/tmp/srcfiles/$(basename "$f")"
             done
 
             git add "${FILES[@]}"
