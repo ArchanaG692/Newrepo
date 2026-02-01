@@ -13,7 +13,6 @@ permissions:
 
 jobs:
   cherry_pick_and_push_to_feature:
-    if: startsWith(github.event.pull_request.base.ref, 'feature-') && github.event.pull_request.head.ref == 'Dev1'
     runs-on: ubuntu-latest
 
     steps:
