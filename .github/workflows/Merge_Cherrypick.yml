@@ -51,29 +51,25 @@ jobs:
           echo "$BODY"
           echo "----- PR BODY END -----"
 
-          # ✅ Robust parsing: pass BODY via stdin to python and parse line-by-line
-          COMMITS=$(python3 - <<'PY' <<<"$BODY"
+          # ✅ Robust parsing: use python -c and pass BODY via stdin (no heredoc + here-string conflict)
+          COMMITS=$(python3 -c '
           import sys, re
-          
-          text = sys.stdin.read().replace("\r\n", "\n")
+          text = sys.stdin.read().replace("\r\n","\n")
           lines = text.splitlines()
           
           key_re = re.compile(r"^\s*CHERRY[\s_]+PICK[\s_]+COMMITS\s*:\s*(.*)\s*$", re.IGNORECASE)
           sha_re = re.compile(r"\b[0-9a-f]{7,40}\b")
           
           commits = []
-          found = False
-          
           for i, line in enumerate(lines):
               m = key_re.match(line)
               if not m:
                   continue
           
-              found = True
-              # Same-line shas after colon
+              # Same-line SHAs after colon
               commits += sha_re.findall(m.group(1) or "")
           
-              # Multiline shas until blank line / end
+              # Multiline SHAs until blank line / end
               j = i + 1
               while j < len(lines) and lines[j].strip() != "":
                   commits += sha_re.findall(lines[j])
@@ -81,10 +77,8 @@ jobs:
           
               break
           
-          # Print space-separated commits
           print(" ".join(commits))
-          PY
-          )
+          ' <<< "$BODY")
 
           if [ -z "$COMMITS" ]; then
             echo "ERROR: No commits found in PR body."
