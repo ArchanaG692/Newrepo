@@ -17,7 +17,7 @@ jobs:
     steps:
       - name: V2 PROOF – new workflow running
         run: |
-          echo "✅ Using PR body commit selection + automatic conflicted-file CP marker resolution"
+          echo "✅ Using PR body commit selection + conflict strategy: SOURCE(dev) wins on conflict"
           echo "workflow_run id = ${{ github.event.workflow_run.id }}"
           echo "workflow_run head_sha = ${{ github.event.workflow_run.head_sha }}"
 
@@ -111,17 +111,17 @@ jobs:
           git checkout -b "$TEMP_BRANCH" "origin/INT1"
 
       # ------------------------------------------------------------
-      # 3) Cherry-pick with automatic conflicted-file CP marker resolution
-      #    - On conflict: keep INT1 everywhere except within // CP_START..// CP_END blocks
-      #    - Handles "empty cherry-pick" by skipping
+      # 3) Cherry-pick with Option 1 conflict strategy
+      #    - If cherry-pick conflicts: SOURCE (dev commit) WINS ENTIRE FILE for conflicted files
+      #    - Then continue or skip empty cherry-pick
       # ------------------------------------------------------------
-      - name: Cherry-pick selected commits (auto conflicted-file CP marker strategy)
+      - name: Cherry-pick selected commits (SOURCE wins on conflict)
         run: |
           set -euo pipefail
 
-          apply_cp_blocks_to_conflicts () {
+          resolve_conflicts_source_wins () {
             local sha="$1"
-            echo "Applying CP blocks from SOURCE commit $sha to conflicted files only..."
+            echo "Conflict detected. Using SOURCE (commit $sha) for conflicted files..."
 
             local conflict_files
             conflict_files=$(git diff --name-only --diff-filter=U || true)
@@ -134,67 +134,34 @@ jobs:
             mkdir -p /tmp/srcfiles
 
             for f in $conflict_files; do
-              echo "Resolving conflicted file: $f"
+              echo "Resolving conflicted file (SOURCE wins): $f"
 
-              # TARGET version from INT1
-              if ! git show "origin/INT1:$f" > "/tmp/target_$(basename "$f")" 2>/dev/null; then
-                echo "WARN: File $f not found on origin/INT1. Skipping CP strategy for this file."
-                continue
-              fi
-
-              # SOURCE version from commit sha
+              # If the file doesn't exist in source commit, we can't take source.
+              # In that case, keep TARGET (current working tree) and continue.
               if ! git show "$sha:$f" > "/tmp/srcfiles/$(basename "$f")" 2>/dev/null; then
-                echo "WARN: File $f not found in commit $sha. Using TARGET entirely."
-                cp "/tmp/target_$(basename "$f")" "$f"
+                echo "WARN: File $f not found in commit $sha. Leaving as-is (cannot take SOURCE)."
                 continue
               fi
 
-              python3 -c '
-          import re, sys, pathlib
-          
-          work_path = pathlib.Path(sys.argv[1])
-          target_path = pathlib.Path(sys.argv[2])
-          source_path = pathlib.Path(sys.argv[3])
-          
-          target = target_path.read_text(encoding="utf-8", errors="replace")
-          source = source_path.read_text(encoding="utf-8", errors="replace")
-          
-          pat = re.compile(r"(//\s*CP_START[\s\S]*?//\s*CP_END)", re.DOTALL)
-          
-          t_blocks = pat.findall(target)
-          s_blocks = pat.findall(source)
-          
-          # If markers missing or mismatch -> use TARGET entirely
-          if not t_blocks or not s_blocks or len(t_blocks) != len(s_blocks):
-              work_path.write_text(target, encoding="utf-8")
-              print(f"WARN: CP blocks missing/mismatch in {work_path}. Using TARGET (INT1) file entirely.")
-              raise SystemExit(0)
-          
-          new_target = target
-          for old, new in zip(t_blocks, s_blocks):
-              new_target = new_target.replace(old, new, 1)
-          
-          work_path.write_text(new_target, encoding="utf-8")
-          print(f"Resolved {work_path}: SOURCE wins only inside CP blocks; TARGET elsewhere.")
-          ' "$f" "/tmp/target_$(basename "$f")" "/tmp/srcfiles/$(basename "$f")"
+              # Overwrite working tree file with SOURCE version
+              cp "/tmp/srcfiles/$(basename "$f")" "$f"
             done
 
             git add $conflict_files
 
             # If conflicts still remain, fail clearly
             if git diff --name-only --diff-filter=U | grep -q .; then
-              echo "ERROR: Some conflicts remain after CP strategy:"
+              echo "ERROR: Some conflicts remain after SOURCE-wins resolution:"
               git diff --name-only --diff-filter=U
               exit 1
             fi
 
-            # ✅ IMPORTANT: finish cherry-pick correctly
-            # If no staged changes, cherry-pick becomes empty -> skip it
+            # Finish cherry-pick properly
             if git diff --cached --quiet; then
-              echo "Cherry-pick became empty after resolution -> skipping commit $sha"
+              echo "Cherry-pick became empty after SOURCE-wins resolution -> skipping commit $sha"
               git cherry-pick --skip
             else
-              echo "Continuing cherry-pick after resolution for $sha"
+              echo "Continuing cherry-pick after SOURCE-wins resolution for $sha"
               git cherry-pick --continue
             fi
           }
@@ -204,8 +171,8 @@ jobs:
             if git cherry-pick "$sha"; then
               echo "Cherry-pick succeeded for $sha"
             else
-              echo "Cherry-pick conflict for $sha -> auto resolving conflicted files with CP markers"
-              apply_cp_blocks_to_conflicts "$sha"
+              echo "Cherry-pick conflict for $sha -> resolving with SOURCE-wins strategy"
+              resolve_conflicts_source_wins "$sha"
             fi
           done
 
@@ -214,7 +181,7 @@ jobs:
           git push origin "$TEMP_BRANCH" --force
 
       # ------------------------------------------------------------
-      # 4) Create PR + auto merge
+      # 4) Create PR + auto merge (skip if no diff)
       # ------------------------------------------------------------
       - name: Create PR from temp branch to INT1
         id: cpr
@@ -224,6 +191,20 @@ jobs:
             const { owner, repo } = context.repo;
             const head = process.env.TEMP_BRANCH;
             const base = "INT1";
+
+            // Skip PR creation if no commits between base and head
+            const cmp = await github.rest.repos.compareCommitsWithBasehead({
+              owner,
+              repo,
+              basehead: `${base}...${head}`
+            });
+
+            if ((cmp.data.ahead_by || 0) === 0) {
+              core.info(`No commits between ${base} and ${head}. Skipping PR creation.`);
+              core.setOutput("pr_number", "");
+              core.setOutput("pr_node_id", "");
+              return;
+            }
 
             const existing = await github.rest.pulls.list({
               owner, repo, state: "open", head: `${owner}:${head}`, base
@@ -251,8 +232,7 @@ jobs:
                 ...commits.map(c => `- \`${c}\``),
                 "",
                 "Conflict strategy (only when conflicts occur):",
-                "- Uses INT1 version everywhere",
-                "- Except inside // CP_START..// CP_END blocks where SOURCE commit wins",
+                "- SOURCE (dev commit) wins for the entire conflicted file(s)",
               ].join("\n")
             });
 
@@ -260,6 +240,7 @@ jobs:
             core.setOutput("pr_node_id", pr.data.node_id);
 
       - name: Merge PR (SHA locked)
+        if: steps.cpr.outputs.pr_number != ''
         uses: actions/github-script@v7
         with:
           script: |
