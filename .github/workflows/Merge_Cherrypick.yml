@@ -97,8 +97,8 @@ jobs:
           echo "COMMITS=$COMMITS" >> $GITHUB_ENV
           echo "Selected commits: $COMMITS"
 
-          env:
-            BODY: ""  # BODY set in-script; this keeps env section valid
+        env:
+          BODY: ""  # BODY set in-script; this keeps env section valid
 
       # 2) Checkout INT1
       - name: Checkout INT1
