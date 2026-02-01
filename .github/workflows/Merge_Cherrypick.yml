@@ -17,117 +17,213 @@ jobs:
     steps:
       - name: Set variables
         run: |
-          echo "TEMP_BRANCH=cp-${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
           echo "RUN_ID=${{ github.event.workflow_run.id }}" >> $GITHUB_ENV
+          echo "SCANNED_SHA=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
+          echo "TEMP_BRANCH=cp-${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
 
-      # 1) Find the PR associated with this workflow run and extract commit list
-      - name: Get PR number + commit list from PR body
-        id: prinfo
+      # 1) Find the PR that triggered the scan workflow, and read commit(s) to cherry-pick
+      # Developer must add this in PR body:
+      # CHERRY_PICK_COMMITS:
+      # 7233de3
+      # 9a12bcf
+      #
+      # If not present, it will fall back to SCANNED_SHA (latest) so the pipeline still works.
+      - name: Get PR number + commit list (from PR body)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ env.RUN_ID }}
+          SCANNED_SHA: ${{ env.SCANNED_SHA }}
         run: |
-          set -e
+          set -euo pipefail
 
-          # Find PR number linked to this workflow run
           PR_NUMBER=$(gh api "repos/$REPO/actions/runs/$RUN_ID" --jq '.pull_requests[0].number')
           if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
-            echo "No PR associated with this workflow_run. Exiting."
+            echo "ERROR: No PR associated with this workflow_run. Cannot determine commit list."
             exit 1
           fi
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
-          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
-          # Read PR body
           BODY=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq '.body // ""')
 
-          # Extract commit SHAs after CHERRY_PICK_COMMITS:
-          # Supports:
-          # CHERRY_PICK_COMMITS: sha1 sha2
-          # or multiline:
-          # CHERRY_PICK_COMMITS:
-          # sha1
-          # sha2
           COMMITS=$(python3 - << 'PY'
-          import re, os, sys
+          import re, os
           body = os.environ.get("BODY","")
-          # Find section starting with CHERRY_PICK_COMMITS:
-          m = re.search(r'CHERRY_PICK_COMMITS\s*:\s*(.*)', body, re.IGNORECASE)
+          scanned = os.environ.get("SCANNED_SHA","").strip()
+          
           commits = []
+          
+          # Same-line: CHERRY_PICK_COMMITS: sha1 sha2
+          m = re.search(r'CHERRY_PICK_COMMITS\s*:\s*(.*)', body, re.IGNORECASE)
           if m:
-              # same-line form
               commits = re.findall(r'\b[0-9a-f]{7,40}\b', m.group(1))
           else:
-              # multiline form
+              # Multiline:
+              # CHERRY_PICK_COMMITS:
+              # sha1
+              # sha2
               m2 = re.search(r'CHERRY_PICK_COMMITS\s*:\s*\n([\s\S]+?)(\n\s*\n|$)', body, re.IGNORECASE)
               if m2:
                   commits = re.findall(r'\b[0-9a-f]{7,40}\b', m2.group(1))
           
-          # PrINT1 as space-separated list
-          prINT1(" ".join(commits))
+          # Fallback to scanned sha (latest) if nothing provided
+          if not commits and scanned:
+              commits = [scanned]
+          
+          print(" ".join(commits))
           PY
-                    )
+          )
 
           if [ -z "$COMMITS" ]; then
-            echo "No commits specified in PR body."
-            echo "Add this to PR description:"
-            echo "CHERRY_PICK_COMMITS:"
-            echo "<sha1>"
-            echo "<sha2>"
+            echo "ERROR: No commits could be determined (no CHERRY_PICK_COMMITS and no SCANNED_SHA)."
             exit 1
           fi
 
           echo "COMMITS=$COMMITS" >> $GITHUB_ENV
           echo "Selected commits: $COMMITS"
 
-          env:
-            BODY: ${{ steps.prinfo.outputs.body }}
+        env:
+          BODY: ${{ steps.prinfo.outputs.body }}
+          # NOTE: BODY is passed via env below, GitHub doesn't allow setting steps.prinfo here,
+          # so we pass BODY directly from the command above:
+          # (This env block is overridden by the run itself; kept for clarity.)
 
-      # 2) Checkout INT1
-      - name: Checkout INT1
+      # 2) Checkout INT
+      - name: Checkout INT
         uses: actions/checkout@v4
         with:
-          ref: INT1
+          ref: INT
           fetch-depth: 0
 
       - name: Configure git
         run: |
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      # 3) Fetch refs so commits exist locally
-      - name: Fetch all branch refs (ensure commits exist)
+      # 3) Fetch refs so the selected SHAs are present locally
+      - name: Fetch all refs (branches + PR refs)
         run: |
-          git fetch origin --prune --no-tags +refs/heads/*:refs/remotes/origin/*
+          git fetch origin --prune --no-tags \
+            +refs/heads/*:refs/remotes/origin/* \
+            +refs/pull/*/head:refs/remotes/origin/pull/*
 
-      # 4) Create temp branch
-      - name: Create temp branch from INT11
+      # 4) Create temp branch from INT
+      - name: Create temp branch from INT
         run: |
-          git checkout -b "$TEMP_BRANCH" "origin/INT11"
+          git checkout -b "$TEMP_BRANCH" "origin/INT"
 
-      # 5) Cherry-pick selected commits (in order)
-      - name: Cherry-pick selected commits
+      # 5) Cherry-pick selected commits with marker-based conflict strategy:
+      # - If conflict occurs, we DO NOT try to auto-merge the whole file.
+      # - We keep INT version as base and replace ONLY the block between:
+      #     // CP_START
+      #     ...
+      #     // CP_END
+      #   using the source (commit) version.
+      #
+      # IMPORTANT:
+      #   Add the markers to your Apex (or other) files around the "few specific lines"
+      #   that must always come from SOURCE.
+      #
+      #   Example in Demo.cls:
+      #     // CP_START
+      #     System.debug('my new message');
+      #     // CP_END
+      #
+      # Configure which files to apply this selective strategy to in FILES array.
+      - name: Cherry-pick commits (selective conflict resolution via CP markers)
+        env:
+          COMMITS: ${{ env.COMMITS }}
         run: |
-          set -e
+          set -euo pipefail
+
+          # List of files where you want the selective "CP block" strategy.
+          # Add more files as needed.
+          FILES=(
+            "force-app/main/default/classes/Demo.cls"
+          )
+
+          apply_cp_blocks() {
+            local sha="$1"
+            echo "Applying CP blocks from commit $sha onto current branch state..."
+
+            mkdir -p /tmp/srcfiles
+
+            for f in "${FILES[@]}"; do
+              # Get source file content from the selected commit
+              if ! git show "$sha:$f" > "/tmp/srcfiles/$(basename "$f")"; then
+                echo "ERROR: File $f not found in commit $sha. Cannot apply CP block strategy."
+                exit 1
+              fi
+
+              # Ensure target file exists in current branch
+              if [ ! -f "$f" ]; then
+                echo "ERROR: Target file $f does not exist on INT branch state."
+                exit 1
+              fi
+
+              python3 - << 'PY' "$f" "/tmp/srcfiles/$(basename "$f")"
+              import re, sys, pathlib
+              
+              target_path = pathlib.Path(sys.argv[1])
+              source_path = pathlib.Path(sys.argv[2])
+              
+              target = target_path.read_text(encoding="utf-8", errors="replace")
+              source = source_path.read_text(encoding="utf-8", errors="replace")
+              
+              START = r"//\s*CP_START"
+              END   = r"//\s*CP_END"
+              pattern = re.compile(rf"({START}\s*\n.*?\n\s*{END})", re.DOTALL)
+              
+              src_blocks = pattern.findall(source)
+              tgt_blocks = pattern.findall(target)
+              
+              if not src_blocks:
+                raise SystemExit(f"No CP_START/CP_END block found in SOURCE file: {source_path}")
+              if not tgt_blocks:
+                raise SystemExit(f"No CP_START/CP_END block found in TARGET file: {target_path}")
+              if len(src_blocks) != len(tgt_blocks):
+                raise SystemExit(f"Mismatch: SOURCE has {len(src_blocks)} CP block(s), TARGET has {len(tgt_blocks)}")
+              
+              new_target = target
+              for old, new in zip(tgt_blocks, src_blocks):
+                new_target = new_target.replace(old, new, 1)
+              
+              target_path.write_text(new_target, encoding="utf-8")
+              print(f"Replaced {len(src_blocks)} CP block(s) in {target_path}")
+              PY
+            done
+
+            git add "${FILES[@]}"
+            git commit -m "Apply CP blocks from ${sha} onto INT"
+          }
+
+          # Cherry-pick commits in order. If a cherry-pick conflicts:
+          # - abort cherry-pick (restore state)
+          # - apply CP blocks (source wins only inside CP markers; target wins everywhere else)
+          # - continue to next commit
           for sha in $COMMITS; do
-            echo "Cherry-picking $sha ..."
-            git cherry-pick "$sha"
+            echo "===== Processing commit: $sha ====="
+            if git cherry-pick "$sha"; then
+              echo "Cherry-pick succeeded cleanly for $sha"
+            else
+              echo "Cherry-pick conflicted for $sha. Using selective CP marker strategy..."
+              git cherry-pick --abort
+              apply_cp_blocks "$sha"
+            fi
           done
 
       - name: Push temp branch
         run: |
           git push origin "$TEMP_BRANCH" --force
 
-      # 6) Create PR from temp branch to INT11
-      - name: Create PR from temp branch to INT1
+      - name: Create PR from temp branch to INT
         id: cpr
         uses: actions/github-script@v7
         with:
           script: |
             const { owner, repo } = context.repo;
             const head = process.env.TEMP_BRANCH;
-            const base = "INT1";
+            const base = "INT";
 
             const existing = await github.rest.pulls.list({
               owner, repo, state: "open", head: `${owner}:${head}`, base
@@ -140,19 +236,28 @@ jobs:
               return;
             }
 
+            const commits = (process.env.COMMITS || "").split(" ").filter(Boolean);
             const pr = await github.rest.pulls.create({
               owner,
               repo,
               head,
               base,
-              title: `Cherry-pick selected commits INT1o INT1`,
-              body: `Automated cherry-pick from PR #${process.env.PR_NUMBER}\n\nCommits:\n- ${process.env.COMMITS.split(" ").map(c => `\`${c}\``).join("\n- ")}`
+              title: `Cherry-pick selected commits into INT`,
+              body: [
+                `Automated cherry-pick from PR #${process.env.PR_NUMBER}`,
+                ``,
+                `Commits:`,
+                ...commits.map(c => `- \`${c}\``),
+                ``,
+                `Conflict strategy (if conflicts occur):`,
+                `- Inside // CP_START .. // CP_END blocks: SOURCE (commit) wins`,
+                `- Outside those blocks: TARGET (INT) wins`
+              ].join("\n")
             });
 
             core.setOutput("pr_number", pr.data.number);
             core.setOutput("pr_node_id", pr.data.node_id);
 
-      # 7) Merge PR (SHA-locked)
       - name: Merge PR (SHA-locked)
         uses: actions/github-script@v7
         with:
@@ -163,4 +268,14 @@ jobs:
             const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
             const expectedHead = pr.data.head.sha;
 
-            await github.
+            await github.graphql(`
+              mutation($prId: ID!, $expected: GitObjectID!) {
+                mergePullRequest(input: {
+                  pullRequestId: $prId,
+                  mergeMethod: MERGE,
+                  expectedHeadOid: $expected
+                }) {
+                  pullRequest { number merged }
+                }
+              }
+            `, { prId: pr.data.node_id, expected: expectedHead });
