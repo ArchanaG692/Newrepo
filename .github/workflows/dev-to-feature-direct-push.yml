@@ -132,23 +132,92 @@ jobs:
           set -euo pipefail
           git push origin "HEAD:${{ github.base_ref }}"
 
-      - name: Comment on PR #1
+      # ---- NEW: Deliverable / proof (optional but useful) ----
+      - name: Generate delivery summary (what was applied)
+        run: |
+          set -euo pipefail
+          git fetch origin --prune --no-tags +refs/heads/*:refs/remotes/origin/*
+
+          BASELINE="origin/INT1"
+          FEATURE="HEAD"
+
+          echo "=== Commits on feature vs INT1 ===" | tee delivery_summary.md
+          git log --oneline "${BASELINE}..${FEATURE}" | tee -a delivery_summary.md || true
+
+          echo "" | tee -a delivery_summary.md
+          echo "=== Files changed (name-status) ===" | tee -a delivery_summary.md
+          git diff --name-status "${BASELINE}..${FEATURE}" | tee -a delivery_summary.md || true
+
+          echo "" | tee -a delivery_summary.md
+          echo "=== Diff stats ===" | tee -a delivery_summary.md
+          git diff --stat "${BASELINE}..${FEATURE}" | tee -a delivery_summary.md || true
+
+          git diff "${BASELINE}..${FEATURE}" > cherry-pick.patch || true
+
+      - name: Upload delivery artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cherry-pick-delivery
+          path: |
+            delivery_summary.md
+            cherry-pick.patch
+
+      - name: Comment on PR #1 with delivery proof
         uses: actions/github-script@v7
         with:
           script: |
             const { owner, repo } = context.repo;
             const pr = context.payload.pull_request.number;
-            const base = context.payload.pull_request.base.ref;
+            const base = context.payload.pull_request.base.ref; // feature/*
             const commits = (process.env.COMMITS || "").split(" ").filter(Boolean);
+
+            const compareUrl = `https://github.com/${owner}/${repo}/compare/INT1...${encodeURIComponent(base)}`;
 
             await github.rest.issues.createComment({
               owner, repo, issue_number: pr,
               body: [
                 `✅ Cherry-pick completed and pushed directly to \`${base}\`.`,
                 ``,
-                `Commits applied:`,
+                `**Commits requested:**`,
                 ...commits.map(c => `- \`${c}\``),
                 ``,
-                `Next: raise a PR from \`${base}\` ➜ \`INT1\` to trigger code scan + merge gate.`
+                `**Delivery / proof:**`,
+                `- Compare (INT1 → ${base}): ${compareUrl}`,
+                `- Artifact in this workflow run: **cherry-pick-delivery** (delivery_summary.md + cherry-pick.patch)`,
+                ``,
+                `**Next:** Raise PR from \`${base}\` ➜ \`INT1\` to trigger code scan + merge gate.`
               ].join("\n")
+            });
+
+      # ---- NEW: Label PR as automation + close it automatically ----
+      - name: Label and close PR #1 (automation request)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request.number;
+
+            // Ensure these labels exist in the repo:
+            // - cherry-pick-request
+            // - automation
+            // - cherry-pick-applied
+            const labelsToAdd = ["cherry-pick-request", "automation", "cherry-pick-applied"];
+
+            try {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: pr,
+                labels: labelsToAdd
+              });
+            } catch (e) {
+              core.info("Could not add one or more labels (create them in repo Settings → Labels).");
+            }
+
+            // Close PR #1 so it doesn't look like a normal PR waiting for merge
+            await github.rest.pulls.update({
+              owner,
+              repo,
+              pull_number: pr,
+              state: "closed"
             });
