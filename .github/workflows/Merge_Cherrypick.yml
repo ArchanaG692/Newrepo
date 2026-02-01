@@ -10,46 +10,123 @@ permissions:
   pull-requests: write
 
 jobs:
-  cherry_pick_one_commit:
+  cherry_pick_selected_commits:
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set variables
-        id: vars
+      - name: V2 PROOF - This is the new workflow
         run: |
-          echo "SCANNED_SHA=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
-          echo "TEMP_BRANCH=cp-${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
+          echo "✅ Running V2 workflow that reads CHERRY_PICK_COMMITS from PR body"
+          echo "workflow_run id: ${{ github.event.workflow_run.id }}"
+          echo "workflow_run head_sha: ${{ github.event.workflow_run.head_sha }}"
 
-      - name: Checkout INT
+      - name: Set variables
+        run: |
+          echo "RUN_ID=${{ github.event.workflow_run.id }}" >> $GITHUB_ENV
+          echo "TEMP_BRANCH=cp-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
+
+      # 1) Identify PR that triggered code-scan run and extract commit list from PR body
+      - name: Get PR number + commit list from PR body
+        id: prinfo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+
+          PR_NUMBER=$(gh api "repos/$REPO/actions/runs/$RUN_ID" --jq '.pull_requests[0].number')
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+            echo "ERROR: No PR linked to this workflow_run. Ensure code-scan is triggered by pull_request."
+            exit 1
+          fi
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
+          echo "PR number: $PR_NUMBER"
+
+          BODY=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq '.body // ""')
+
+          echo "----- PR BODY START -----"
+          echo "$BODY"
+          echo "----- PR BODY END -----"
+
+          COMMITS=$(python3 - <<PY
+          import re, os
+          body = os.environ.get("BODY","")
+          
+          commits = []
+          
+          # Same-line: CHERRY_PICK_COMMITS: sha1 sha2
+          m = re.search(r'CHERRY_PICK_COMMITS\\s*:\\s*(.*)', body, re.IGNORECASE)
+          if m:
+              commits = re.findall(r'\\b[0-9a-f]{7,40}\\b', m.group(1))
+          else:
+              # Multiline:
+              # CHERRY_PICK_COMMITS:
+              # sha1
+              # sha2
+              m2 = re.search(r'CHERRY_PICK_COMMITS\\s*:\\s*\\n([\\s\\S]+?)(\\n\\s*\\n|$)', body, re.IGNORECASE)
+              if m2:
+                  commits = re.findall(r'\\b[0-9a-f]{7,40}\\b', m2.group(1))
+          
+          print(" ".join(commits))
+          PY
+          )
+
+          if [ -z "$COMMITS" ]; then
+            echo "ERROR: No commits found in PR body."
+            echo "Add this to PR description:"
+            echo "CHERRY_PICK_COMMITS:"
+            echo "  <sha1>"
+            echo "  <sha2>"
+            exit 1
+          fi
+
+          echo "COMMITS=$COMMITS" >> $GITHUB_ENV
+          echo "Selected commits: $COMMITS"
+
+          env:
+            BODY: ""  # will be overwritten by script; kept to satisfy env reference
+
+      # 2) Checkout INT1
+      - name: Checkout INT1
         uses: actions/checkout@v4
         with:
           ref: INT1
-          fetch-depth: 0  # required for cherry-pick
+          fetch-depth: 0
 
       - name: Configure git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Fetch scanned commit
+      # 3) Fetch refs so the specified SHAs exist locally
+      - name: Fetch all refs (branches + PR refs)
         run: |
-          # Fetch commit object even if it's only on PR branch
-          git fetch origin $SCANNED_SHA
+          git fetch origin --prune --no-tags \
+            +refs/heads/*:refs/remotes/origin/* \
+            +refs/pull/*/head:refs/remotes/origin/pull/*
 
-      - name: Create temp branch from INT
+      - name: Create temp branch from INT1
         run: |
-          git checkout -b $TEMP_BRANCH origin/INT1
+          git checkout -b "$TEMP_BRANCH" "origin/INT1"
 
-      - name: Cherry-pick ONLY the scanned commit
+      # 4) Cherry-pick exactly the commits specified in PR description (in order)
+      - name: Cherry-pick selected commits (NOT latest)
         run: |
-          git cherry-pick $SCANNED_SHA
+          set -euo pipefail
+          echo "Cherry-picking commits: $COMMITS"
+          for sha in $COMMITS; do
+            echo "Cherry-picking $sha ..."
+            git cherry-pick "$sha"
+          done
 
       - name: Push temp branch
         run: |
-          git push origin $TEMP_BRANCH --force
+          git push origin "$TEMP_BRANCH" --force
 
-      - name: Create PR from temp branch to INT
+      # 5) Create PR from temp branch to INT1 (avoid duplicates)
+      - name: Create PR from temp branch to INT1
         id: cpr
         uses: actions/github-script@v7
         with:
@@ -58,7 +135,6 @@ jobs:
             const head = process.env.TEMP_BRANCH;
             const base = "INT1";
 
-            // Avoid duplicate PRs if re-run
             const existing = await github.rest.pulls.list({
               owner, repo, state: "open", head: `${owner}:${head}`, base
             });
@@ -70,31 +146,35 @@ jobs:
               return;
             }
 
+            const commits = (process.env.COMMITS || "").split(" ").filter(Boolean);
             const pr = await github.rest.pulls.create({
               owner,
               repo,
               head,
               base,
-              title: `Cherry-pick ${process.env.SCANNED_SHA} into INT`,
-              body: `Automated cherry-pick of scanned commit:\n\n- Commit: \`${process.env.SCANNED_SHA}\`\n- Source workflow run: \`${context.payload.workflow_run.id}\``
+              title: `Cherry-pick selected commits into INT1`,
+              body: [
+                `Automated cherry-pick from PR #${process.env.PR_NUMBER}`,
+                ``,
+                `Commits:`,
+                ...commits.map(c => `- \`${c}\``),
+              ].join("\n")
             });
 
             core.setOutput("pr_number", pr.data.number);
             core.setOutput("pr_node_id", pr.data.node_id);
 
+      # 6) Merge PR (SHA-locked)
       - name: Merge PR (SHA-locked)
         uses: actions/github-script@v7
         with:
           script: |
             const { owner, repo } = context.repo;
-            const prNumber = Number(core.getInput('prNumber') || "${{ steps.cpr.outputs.pr_number }}");
+            const prNumber = Number("${{ steps.cpr.outputs.pr_number }}");
 
             const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
-
-            // Ensure the head is still our temp branch HEAD (extra safety)
             const expectedHead = pr.data.head.sha;
 
-            // SHA-locked merge so nothing changes mid-flight
             await github.graphql(`
               mutation($prId: ID!, $expected: GitObjectID!) {
                 mergePullRequest(input: {
