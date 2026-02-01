@@ -1,0 +1,20 @@
+name: code-scan
+
+on:
+  pull_request:
+    branches: ["INT1"]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Code Scanner
+        run: |
+          echo "run scanner"
+          # exit 1 on fail
