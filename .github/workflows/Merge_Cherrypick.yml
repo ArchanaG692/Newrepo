@@ -26,9 +26,7 @@ jobs:
           echo "RUN_ID=${{ github.event.workflow_run.id }}" >> $GITHUB_ENV
           echo "TEMP_BRANCH=cp-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
 
-      # ------------------------------------------------------------
-      # 1) Get PR number + parse commit list from PR body
-      # ------------------------------------------------------------
+      # 1) Identify PR that triggered code-scan run and extract commit list from PR body
       - name: Get PR number + commit list from PR body
         id: prinfo
         env:
@@ -53,20 +51,37 @@ jobs:
           echo "$BODY"
           echo "----- PR BODY END -----"
 
-          COMMITS=$(python3 - <<'PY'
-          import re
+          # ✅ Robust parsing: pass BODY via stdin to python and parse line-by-line
+          COMMITS=$(python3 - <<'PY' <<<"$BODY"
+          import sys, re
           
-          body = """'"$BODY"'""".replace("\r\n", "\n")
+          text = sys.stdin.read().replace("\r\n", "\n")
+          lines = text.splitlines()
           
-          key = r"CHERRY[\s_]+PICK[\s_]+COMMITS"
-          pattern = rf"{key}\s*:\s*(?:\n|\s)([\s\S]+?)(?:\n\s*\n|$)"
-          
-          m = re.search(pattern, body, re.IGNORECASE)
+          key_re = re.compile(r"^\s*CHERRY[\s_]+PICK[\s_]+COMMITS\s*:\s*(.*)\s*$", re.IGNORECASE)
+          sha_re = re.compile(r"\b[0-9a-f]{7,40}\b")
           
           commits = []
-          if m:
-              commits = re.findall(r"\b[0-9a-f]{7,40}\b", m.group(1))
+          found = False
           
+          for i, line in enumerate(lines):
+              m = key_re.match(line)
+              if not m:
+                  continue
+          
+              found = True
+              # Same-line shas after colon
+              commits += sha_re.findall(m.group(1) or "")
+          
+              # Multiline shas until blank line / end
+              j = i + 1
+              while j < len(lines) and lines[j].strip() != "":
+                  commits += sha_re.findall(lines[j])
+                  j += 1
+          
+              break
+          
+          # Print space-separated commits
           print(" ".join(commits))
           PY
           )
@@ -75,18 +90,17 @@ jobs:
             echo "ERROR: No commits found in PR body."
             echo "Use one of these formats:"
             echo "CHERRY PICK COMMITS:"
-            echo "  <sha1>"
+            echo "7233de3"
             echo ""
-            echo "CHERRY_PICK_COMMITS: <sha1> <sha2>"
+            echo "OR"
+            echo "CHERRY_PICK_COMMITS: 7233de3 9a12bcf"
             exit 1
           fi
 
           echo "COMMITS=$COMMITS" >> $GITHUB_ENV
           echo "Selected commits: $COMMITS"
 
-      # ------------------------------------------------------------
       # 2) Checkout INT1
-      # ------------------------------------------------------------
       - name: Checkout INT1
         uses: actions/checkout@v4
         with:
@@ -98,10 +112,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      # ------------------------------------------------------------
-      # 3) Fetch refs so selected SHAs exist locally
-      # ------------------------------------------------------------
-      - name: Fetch all refs
+      # 3) Fetch refs so the specified SHAs exist locally
+      - name: Fetch all refs (branches + PR refs)
         run: |
           git fetch origin --prune --no-tags \
             +refs/heads/*:refs/remotes/origin/* \
@@ -111,9 +123,7 @@ jobs:
         run: |
           git checkout -b "$TEMP_BRANCH" "origin/INT1"
 
-      # ------------------------------------------------------------
-      # 4) Cherry-pick EXACT commits from PR body
-      # ------------------------------------------------------------
+      # 4) Cherry-pick exactly the commits specified in PR description (in order)
       - name: Cherry-pick selected commits
         run: |
           set -euo pipefail
@@ -127,9 +137,6 @@ jobs:
         run: |
           git push origin "$TEMP_BRANCH" --force
 
-      # ------------------------------------------------------------
-      # 5) Create PR to INT1
-      # ------------------------------------------------------------
       - name: Create PR from temp branch to INT1
         id: cpr
         uses: actions/github-script@v7
@@ -144,12 +151,13 @@ jobs:
             });
 
             if (existing.data.length) {
+              core.info(`PR already exists: #${existing.data[0].number}`);
               core.setOutput("pr_number", existing.data[0].number);
               core.setOutput("pr_node_id", existing.data[0].node_id);
               return;
             }
 
-            const commits = process.env.COMMITS.split(" ");
+            const commits = (process.env.COMMITS || "").split(" ").filter(Boolean);
             const pr = await github.rest.pulls.create({
               owner,
               repo,
@@ -167,9 +175,6 @@ jobs:
             core.setOutput("pr_number", pr.data.number);
             core.setOutput("pr_node_id", pr.data.node_id);
 
-      # ------------------------------------------------------------
-      # 6) Auto-merge PR (SHA locked)
-      # ------------------------------------------------------------
       - name: Merge PR (SHA locked)
         uses: actions/github-script@v7
         with:
