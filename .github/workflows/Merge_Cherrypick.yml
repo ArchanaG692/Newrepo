@@ -10,29 +10,42 @@ permissions:
   pull-requests: write
 
 jobs:
-  cherry_pick_selected_commits:
+  cherry_pick_one_commit:
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     steps:
       - name: V2 PROOF - This is the new workflow
         run: |
-          echo "✅ Running V2 workflow that reads CHERRY_PICK_COMMITS from PR body"
+          echo "✅ Running V2 workflow that reads CHERRY PICK COMMITS / CHERRY_PICK_COMMITS from PR body"
           echo "workflow_run id: ${{ github.event.workflow_run.id }}"
           echo "workflow_run head_sha: ${{ github.event.workflow_run.head_sha }}"
 
       - name: Set variables
         run: |
           echo "RUN_ID=${{ github.event.workflow_run.id }}" >> $GITHUB_ENV
+          echo "SCANNED_SHA=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
           echo "TEMP_BRANCH=cp-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
 
       # 1) Identify PR that triggered code-scan run and extract commit list from PR body
+      # Supported PR body formats:
+      #   CHERRY_PICK_COMMITS:
+      #   <sha1>
+      #   <sha2>
+      #
+      #   CHERRY PICK COMMITS:
+      #   <sha1>
+      #
+      #   CHERRY_PICK_COMMITS: <sha1> <sha2>
+      #   CHERRY PICK COMMITS: <sha1>
+      #
       - name: Get PR number + commit list from PR body
         id: prinfo
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
+          SCANNED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
 
@@ -52,22 +65,18 @@ jobs:
 
           COMMITS=$(python3 - <<PY
           import re, os
-          body = os.environ.get("BODY","")
+          
+          body = os.environ.get("BODY", "")
+          body = body.replace("\\r\\n", "\\n")  # normalize windows newlines
+          
+          key = r"CHERRY[\\s_]+PICK[\\s_]+COMMITS"
+          pattern = rf"{key}\\s*:\\s*(?:\\n|\\s)([\\s\\S]+?)(?:\\n\\s*\\n|$)"
+          
+          m = re.search(pattern, body, re.IGNORECASE)
           
           commits = []
-          
-          # Same-line: CHERRY_PICK_COMMITS: sha1 sha2
-          m = re.search(r'CHERRY_PICK_COMMITS\\s*:\\s*(.*)', body, re.IGNORECASE)
           if m:
-              commits = re.findall(r'\\b[0-9a-f]{7,40}\\b', m.group(1))
-          else:
-              # Multiline:
-              # CHERRY_PICK_COMMITS:
-              # sha1
-              # sha2
-              m2 = re.search(r'CHERRY_PICK_COMMITS\\s*:\\s*\\n([\\s\\S]+?)(\\n\\s*\\n|$)', body, re.IGNORECASE)
-              if m2:
-                  commits = re.findall(r'\\b[0-9a-f]{7,40}\\b', m2.group(1))
+              commits = re.findall(r"\\b[0-9a-f]{7,40}\\b", m.group(1))
           
           print(" ".join(commits))
           PY
@@ -75,10 +84,13 @@ jobs:
 
           if [ -z "$COMMITS" ]; then
             echo "ERROR: No commits found in PR body."
-            echo "Add this to PR description:"
+            echo "Add one of these to PR description:"
             echo "CHERRY_PICK_COMMITS:"
-            echo "  <sha1>"
-            echo "  <sha2>"
+            echo "<sha1>"
+            echo "<sha2>"
+            echo ""
+            echo "OR"
+            echo "CHERRY PICK COMMITS: <sha1> <sha2>"
             exit 1
           fi
 
@@ -86,7 +98,7 @@ jobs:
           echo "Selected commits: $COMMITS"
 
           env:
-            BODY: ""  # will be overwritten by script; kept to satisfy env reference
+            BODY: ""  # BODY set in-script; this keeps env section valid
 
       # 2) Checkout INT1
       - name: Checkout INT1
@@ -135,6 +147,7 @@ jobs:
             const head = process.env.TEMP_BRANCH;
             const base = "INT1";
 
+            // Avoid duplicate PRs if re-run
             const existing = await github.rest.pulls.list({
               owner, repo, state: "open", head: `${owner}:${head}`, base
             });
@@ -147,6 +160,7 @@ jobs:
             }
 
             const commits = (process.env.COMMITS || "").split(" ").filter(Boolean);
+
             const pr = await github.rest.pulls.create({
               owner,
               repo,
@@ -170,7 +184,7 @@ jobs:
         with:
           script: |
             const { owner, repo } = context.repo;
-            const prNumber = Number("${{ steps.cpr.outputs.pr_number }}");
+            const prNumber = Number(core.getInput('prNumber') || "${{ steps.cpr.outputs.pr_number }}");
 
             const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
             const expectedHead = pr.data.head.sha;
