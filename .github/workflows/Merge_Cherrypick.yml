@@ -17,7 +17,7 @@ jobs:
     steps:
       - name: V2 PROOF – new workflow running
         run: |
-          echo "✅ Using PR body commit selection logic"
+          echo "✅ Using PR body commit selection + CP marker conflict resolution"
           echo "workflow_run id = ${{ github.event.workflow_run.id }}"
           echo "workflow_run head_sha = ${{ github.event.workflow_run.head_sha }}"
 
@@ -26,9 +26,10 @@ jobs:
           echo "RUN_ID=${{ github.event.workflow_run.id }}" >> $GITHUB_ENV
           echo "TEMP_BRANCH=cp-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
 
-      # 1) Identify PR that triggered code-scan run and extract commit list from PR body
+      # ------------------------------------------------------------
+      # 1) Identify PR + extract commit list
+      # ------------------------------------------------------------
       - name: Get PR number + commit list from PR body
-        id: prinfo
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -43,38 +44,25 @@ jobs:
           fi
 
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
-          echo "PR number: $PR_NUMBER"
-
           BODY=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq '.body // ""')
 
-          echo "----- PR BODY START -----"
-          echo "$BODY"
-          echo "----- PR BODY END -----"
-
-          # ✅ Robust parsing: use python -c and pass BODY via stdin (no heredoc + here-string conflict)
           COMMITS=$(python3 -c '
           import sys, re
           text = sys.stdin.read().replace("\r\n","\n")
           lines = text.splitlines()
           
-          key_re = re.compile(r"^\s*CHERRY[\s_]+PICK[\s_]+COMMITS\s*:\s*(.*)\s*$", re.IGNORECASE)
+          key_re = re.compile(r"^\s*CHERRY[\s_]+PICK[\s_]+COMMITS\s*:\s*(.*)$", re.IGNORECASE)
           sha_re = re.compile(r"\b[0-9a-f]{7,40}\b")
           
-          commits = []
-          for i, line in enumerate(lines):
-              m = key_re.match(line)
-              if not m:
-                  continue
-          
-              # Same-line SHAs after colon
-              commits += sha_re.findall(m.group(1) or "")
-          
-              # Multiline SHAs until blank line / end
-              j = i + 1
-              while j < len(lines) and lines[j].strip() != "":
-                  commits += sha_re.findall(lines[j])
-                  j += 1
-          
+          commits=[]
+          for i,l in enumerate(lines):
+              m=key_re.match(l)
+              if not m: continue
+              commits+=sha_re.findall(m.group(1) or "")
+              j=i+1
+              while j<len(lines) and lines[j].strip():
+                  commits+=sha_re.findall(lines[j])
+                  j+=1
               break
           
           print(" ".join(commits))
@@ -82,19 +70,15 @@ jobs:
 
           if [ -z "$COMMITS" ]; then
             echo "ERROR: No commits found in PR body."
-            echo "Use one of these formats:"
-            echo "CHERRY PICK COMMITS:"
-            echo "7233de3"
-            echo ""
-            echo "OR"
-            echo "CHERRY_PICK_COMMITS: 7233de3 9a12bcf"
             exit 1
           fi
 
           echo "COMMITS=$COMMITS" >> $GITHUB_ENV
           echo "Selected commits: $COMMITS"
 
+      # ------------------------------------------------------------
       # 2) Checkout INT1
+      # ------------------------------------------------------------
       - name: Checkout INT1
         uses: actions/checkout@v4
         with:
@@ -106,8 +90,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      # 3) Fetch refs so the specified SHAs exist locally
-      - name: Fetch all refs (branches + PR refs)
+      - name: Fetch all refs
         run: |
           git fetch origin --prune --no-tags \
             +refs/heads/*:refs/remotes/origin/* \
@@ -117,20 +100,66 @@ jobs:
         run: |
           git checkout -b "$TEMP_BRANCH" "origin/INT1"
 
-      # 4) Cherry-pick exactly the commits specified in PR description (in order)
-      - name: Cherry-pick selected commits
+      # ------------------------------------------------------------
+      # 3) Cherry-pick with CP marker conflict resolution
+      # ------------------------------------------------------------
+      - name: Cherry-pick selected commits (CP marker strategy)
         run: |
           set -euo pipefail
-          echo "Cherry-picking commits: $COMMITS"
+
+          FILES=(
+            "force-app/main/default/classes/AccountClass.cls"
+          )
+
+          apply_cp_blocks() {
+            local sha="$1"
+            mkdir -p /tmp/srcfiles
+
+            for f in "${FILES[@]}"; do
+              git show "$sha:$f" > "/tmp/srcfiles/$(basename "$f")"
+
+              python3 - "$f" "/tmp/srcfiles/$(basename "$f")" <<'PY'
+              import re, sys, pathlib
+              
+              t = pathlib.Path(sys.argv[1]).read_text()
+              s = pathlib.Path(sys.argv[2]).read_text()
+              
+              pat = re.compile(r"(//\s*CP_START[\s\S]*?//\s*CP_END)", re.DOTALL)
+              tb = pat.findall(t)
+              sb = pat.findall(s)
+              
+              if not tb or not sb or len(tb)!=len(sb):
+                  raise SystemExit("CP marker mismatch")
+              
+              for o,n in zip(tb,sb):
+                  t=t.replace(o,n,1)
+              
+              pathlib.Path(sys.argv[1]).write_text(t)
+              PY
+            done
+
+            git add "${FILES[@]}"
+            git commit -m "Apply CP blocks from $sha"
+          }
+
           for sha in $COMMITS; do
-            echo "Cherry-picking $sha"
-            git cherry-pick "$sha"
+            echo "Processing $sha"
+            if git cherry-pick "$sha"; then
+              echo "Cherry-pick clean"
+            else
+              echo "Conflict detected – applying CP marker strategy"
+              git cherry-pick --abort
+              apply_cp_blocks "$sha"
+            fi
           done
 
       - name: Push temp branch
         run: |
           git push origin "$TEMP_BRANCH" --force
 
+      # ------------------------------------------------------------
+      # 4) Create PR + auto merge
+      # ------------------------------------------------------------
       - name: Create PR from temp branch to INT1
         id: cpr
         uses: actions/github-script@v7
@@ -145,25 +174,18 @@ jobs:
             });
 
             if (existing.data.length) {
-              core.info(`PR already exists: #${existing.data[0].number}`);
               core.setOutput("pr_number", existing.data[0].number);
               core.setOutput("pr_node_id", existing.data[0].node_id);
               return;
             }
 
-            const commits = (process.env.COMMITS || "").split(" ").filter(Boolean);
             const pr = await github.rest.pulls.create({
               owner,
               repo,
               head,
               base,
               title: "Cherry-pick selected commits into INT1",
-              body: [
-                `Automated cherry-pick from PR #${process.env.PR_NUMBER}`,
-                "",
-                "Commits:",
-                ...commits.map(c => `- \`${c}\``),
-              ].join("\n")
+              body: `Automated cherry-pick from PR #${process.env.PR_NUMBER}`
             });
 
             core.setOutput("pr_number", pr.data.number);
@@ -173,20 +195,18 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const { owner, repo } = context.repo;
-            const prNumber = Number("${{ steps.cpr.outputs.pr_number }}");
-
-            const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
-            const expectedHead = pr.data.head.sha;
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number("${{ steps.cpr.outputs.pr_number }}")
+            });
 
             await github.graphql(`
-              mutation($prId: ID!, $expected: GitObjectID!) {
-                mergePullRequest(input: {
-                  pullRequestId: $prId,
-                  mergeMethod: MERGE,
-                  expectedHeadOid: $expected
-                }) {
-                  pullRequest { number merged }
-                }
+              mutation($id:ID!,$sha:GitObjectID!){
+                mergePullRequest(input:{
+                  pullRequestId:$id,
+                  mergeMethod:MERGE,
+                  expectedHeadOid:$sha
+                }){pullRequest{merged}}
               }
-            `, { prId: pr.data.node_id, expected: expectedHead });
+            `,{id:pr.data.node_id,sha:pr.data.head.sha});
