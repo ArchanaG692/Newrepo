@@ -1,0 +1,60 @@
+name: Cherry-pick PR head commit to int (creates new PR)
+
+on:
+  pull_request:
+    branches: ["int"]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  cherry_pick_head:
+    # Only run when PR is not draft AND has the label "cherry-pick"
+    if: >
+      github.event.pull_request.draft == false &&
+      contains(github.event.pull_request.labels.*.name, 'cherry-pick')
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout base branch (int)
+        uses: actions/checkout@v4
+        with:
+          ref: int
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create cherry-pick branch & cherry-pick PR HEAD commit
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          BRANCH="cp/pr-${PR_NUMBER}-${PR_HEAD_SHA:0:7}"
+          echo "BRANCH=$BRANCH" >> $GITHUB_ENV
+
+          git checkout -b "$BRANCH"
+
+          # Cherry-pick only the latest commit from the PR
+          git cherry-pick "$PR_HEAD_SHA"
+
+      - name: Push cherry-pick branch
+        run: |
+          git push origin "$BRANCH"
+
+      - name: Create PR into int
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh pr create \
+            --base int \
+            --head "$BRANCH" \
+            --title "Cherry-pick ${PR_HEAD_SHA:0:7} from PR #${PR_NUMBER} into int" \
+            --body "Automated cherry-pick of commit ${PR_HEAD_SHA} from PR #${PR_NUMBER}. This PR contains exactly one commit."
