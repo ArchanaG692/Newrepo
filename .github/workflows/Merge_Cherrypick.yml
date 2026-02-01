@@ -150,33 +150,33 @@ jobs:
               fi
 
               python3 -c '
-            import re, sys, pathlib
-            
-            work_path = pathlib.Path(sys.argv[1])
-            target_path = pathlib.Path(sys.argv[2])
-            source_path = pathlib.Path(sys.argv[3])
-            
-            target = target_path.read_text(encoding="utf-8", errors="replace")
-            source = source_path.read_text(encoding="utf-8", errors="replace")
-            
-            pat = re.compile(r"(//\s*CP_START[\s\S]*?//\s*CP_END)", re.DOTALL)
-            
-            t_blocks = pat.findall(target)
-            s_blocks = pat.findall(source)
-            
-            # If markers missing or mismatch -> use TARGET entirely
-            if not t_blocks or not s_blocks or len(t_blocks) != len(s_blocks):
-                work_path.write_text(target, encoding="utf-8")
-                print(f"WARN: CP blocks missing/mismatch in {work_path}. Using TARGET (INT1) file entirely.")
-                raise SystemExit(0)
-            
-            new_target = target
-            for old, new in zip(t_blocks, s_blocks):
-                new_target = new_target.replace(old, new, 1)
-            
-            work_path.write_text(new_target, encoding="utf-8")
-            print(f"Resolved {work_path}: SOURCE wins only inside CP blocks; TARGET elsewhere.")
-            ' "$f" "/tmp/target_$(basename "$f")" "/tmp/srcfiles/$(basename "$f")"
+          import re, sys, pathlib
+          
+          work_path = pathlib.Path(sys.argv[1])
+          target_path = pathlib.Path(sys.argv[2])
+          source_path = pathlib.Path(sys.argv[3])
+          
+          target = target_path.read_text(encoding="utf-8", errors="replace")
+          source = source_path.read_text(encoding="utf-8", errors="replace")
+          
+          pat = re.compile(r"(//\s*CP_START[\s\S]*?//\s*CP_END)", re.DOTALL)
+          
+          t_blocks = pat.findall(target)
+          s_blocks = pat.findall(source)
+          
+          # If markers missing or mismatch -> use TARGET entirely
+          if not t_blocks or not s_blocks or len(t_blocks) != len(s_blocks):
+              work_path.write_text(target, encoding="utf-8")
+              print(f"WARN: CP blocks missing/mismatch in {work_path}. Using TARGET (INT1) file entirely.")
+              raise SystemExit(0)
+          
+          new_target = target
+          for old, new in zip(t_blocks, s_blocks):
+              new_target = new_target.replace(old, new, 1)
+          
+          work_path.write_text(new_target, encoding="utf-8")
+          print(f"Resolved {work_path}: SOURCE wins only inside CP blocks; TARGET elsewhere.")
+          ' "$f" "/tmp/target_$(basename "$f")" "/tmp/srcfiles/$(basename "$f")"
             done
 
             git add $conflict_files
