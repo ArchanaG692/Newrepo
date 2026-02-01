@@ -44,7 +44,13 @@ jobs:
           fi
 
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
+          echo "PR number: $PR_NUMBER"
+
           BODY=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq '.body // ""')
+
+          echo "----- PR BODY START -----"
+          echo "$BODY"
+          echo "----- PR BODY END -----"
 
           COMMITS=$(python3 -c '
           import sys, re
@@ -57,12 +63,13 @@ jobs:
           commits=[]
           for i,l in enumerate(lines):
               m=key_re.match(l)
-              if not m: continue
-              commits+=sha_re.findall(m.group(1) or "")
+              if not m: 
+                  continue
+              commits += sha_re.findall(m.group(1) or "")
               j=i+1
-              while j<len(lines) and lines[j].strip():
-                  commits+=sha_re.findall(lines[j])
-                  j+=1
+              while j < len(lines) and lines[j].strip():
+                  commits += sha_re.findall(lines[j])
+                  j += 1
               break
           
           print(" ".join(commits))
@@ -70,6 +77,9 @@ jobs:
 
           if [ -z "$COMMITS" ]; then
             echo "ERROR: No commits found in PR body."
+            echo "Use:"
+            echo "CHERRY PICK COMMITS:"
+            echo "7233de3"
             exit 1
           fi
 
@@ -101,41 +111,64 @@ jobs:
           git checkout -b "$TEMP_BRANCH" "origin/INT1"
 
       # ------------------------------------------------------------
-      # 3) Cherry-pick with CP marker conflict resolution
+      # 3) Cherry-pick with CP marker conflict resolution (NO HEREDOC)
       # ------------------------------------------------------------
       - name: Cherry-pick selected commits (CP marker strategy)
         run: |
           set -euo pipefail
 
+          # ✅ Put all files that contain CP_START/CP_END markers here
           FILES=(
             "force-app/main/default/classes/AccountClass.cls"
           )
 
-          apply_cp_blocks() {
+          apply_cp_blocks () {
             local sha="$1"
+            echo "Applying CP blocks from SOURCE commit $sha onto TARGET (INT1)..."
+
             mkdir -p /tmp/srcfiles
 
             for f in "${FILES[@]}"; do
-              git show "$sha:$f" > "/tmp/srcfiles/$(basename "$f")"
+              # source version of the file from the commit
+              if ! git show "$sha:$f" > "/tmp/srcfiles/$(basename "$f")"; then
+                echo "ERROR: File $f not found in commit $sha"
+                exit 1
+              fi
 
-              python3 - "$f" "/tmp/srcfiles/$(basename "$f")" <<'PY'
+              # target version must exist in working tree
+              if [ ! -f "$f" ]; then
+                echo "ERROR: Target file missing on INT1: $f"
+                exit 1
+              fi
+
+              python3 -c '
               import re, sys, pathlib
               
-              t = pathlib.Path(sys.argv[1]).read_text()
-              s = pathlib.Path(sys.argv[2]).read_text()
+              target_path = pathlib.Path(sys.argv[1])
+              source_path = pathlib.Path(sys.argv[2])
               
-              pat = re.compile(r"(//\s*CP_START[\s\S]*?//\s*CP_END)", re.DOTALL)
-              tb = pat.findall(t)
-              sb = pat.findall(s)
+              target = target_path.read_text(encoding="utf-8", errors="replace")
+              source = source_path.read_text(encoding="utf-8", errors="replace")
               
-              if not tb or not sb or len(tb)!=len(sb):
-                  raise SystemExit("CP marker mismatch")
+              pat = re.compile(r"(//\s*CP_START[\\s\\S]*?//\s*CP_END)", re.DOTALL)
               
-              for o,n in zip(tb,sb):
-                  t=t.replace(o,n,1)
+              t_blocks = pat.findall(target)
+              s_blocks = pat.findall(source)
               
-              pathlib.Path(sys.argv[1]).write_text(t)
-              PY
+              if not t_blocks:
+                  raise SystemExit(f"No CP block found in TARGET {target_path}")
+              if not s_blocks:
+                  raise SystemExit(f"No CP block found in SOURCE {source_path}")
+              if len(t_blocks) != len(s_blocks):
+                  raise SystemExit(f"CP block count mismatch TARGET={len(t_blocks)} SOURCE={len(s_blocks)}")
+              
+              new_target = target
+              for old, new in zip(t_blocks, s_blocks):
+                  new_target = new_target.replace(old, new, 1)
+              
+              target_path.write_text(new_target, encoding="utf-8")
+              print(f"Replaced {len(s_blocks)} CP block(s) in {target_path}")
+              ' "$f" "/tmp/srcfiles/$(basename "$f")"
             done
 
             git add "${FILES[@]}"
@@ -143,11 +176,11 @@ jobs:
           }
 
           for sha in $COMMITS; do
-            echo "Processing $sha"
+            echo "===== Processing commit: $sha ====="
             if git cherry-pick "$sha"; then
-              echo "Cherry-pick clean"
+              echo "Cherry-pick succeeded for $sha"
             else
-              echo "Conflict detected – applying CP marker strategy"
+              echo "Cherry-pick conflict for $sha -> using CP marker strategy"
               git cherry-pick --abort
               apply_cp_blocks "$sha"
             fi
@@ -174,10 +207,13 @@ jobs:
             });
 
             if (existing.data.length) {
+              core.info(`PR already exists: #${existing.data[0].number}`);
               core.setOutput("pr_number", existing.data[0].number);
               core.setOutput("pr_node_id", existing.data[0].node_id);
               return;
             }
+
+            const commits = (process.env.COMMITS || "").split(" ").filter(Boolean);
 
             const pr = await github.rest.pulls.create({
               owner,
@@ -185,7 +221,16 @@ jobs:
               head,
               base,
               title: "Cherry-pick selected commits into INT1",
-              body: `Automated cherry-pick from PR #${process.env.PR_NUMBER}`
+              body: [
+                `Automated cherry-pick from PR #${process.env.PR_NUMBER}`,
+                "",
+                "Commits:",
+                ...commits.map(c => `- \`${c}\``),
+                "",
+                "Conflict strategy:",
+                "- Inside // CP_START..// CP_END: SOURCE wins",
+                "- Outside: TARGET (INT1) wins"
+              ].join("\n")
             });
 
             core.setOutput("pr_number", pr.data.number);
@@ -195,18 +240,20 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const pr = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: Number("${{ steps.cpr.outputs.pr_number }}")
-            });
+            const { owner, repo } = context.repo;
+            const prNumber = Number("${{ steps.cpr.outputs.pr_number }}");
+
+            const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+            const expectedHead = pr.data.head.sha;
 
             await github.graphql(`
-              mutation($id:ID!,$sha:GitObjectID!){
-                mergePullRequest(input:{
-                  pullRequestId:$id,
-                  mergeMethod:MERGE,
-                  expectedHeadOid:$sha
-                }){pullRequest{merged}}
+              mutation($prId: ID!, $expected: GitObjectID!) {
+                mergePullRequest(input: {
+                  pullRequestId: $prId,
+                  mergeMethod: MERGE,
+                  expectedHeadOid: $expected
+                }) {
+                  pullRequest { number merged }
+                }
               }
-            `,{id:pr.data.node_id,sha:pr.data.head.sha});
+            `, { prId: pr.data.node_id, expected: expectedHead });
