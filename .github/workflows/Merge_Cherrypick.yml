@@ -1,0 +1,108 @@
+name: cherry-pick-only-merge
+
+on:
+  workflow_run:
+    workflows: ["code-scan"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  cherry_pick_one_commit:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set variables
+        id: vars
+        run: |
+          echo "SCANNED_SHA=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
+          echo "TEMP_BRANCH=cp-${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
+
+      - name: Checkout INT
+        uses: actions/checkout@v4
+        with:
+          ref: INT
+          fetch-depth: 0  # required for cherry-pick
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch scanned commit
+        run: |
+          # Fetch commit object even if it's only on PR branch
+          git fetch origin $SCANNED_SHA
+
+      - name: Create temp branch from INT
+        run: |
+          git checkout -b $TEMP_BRANCH origin/INT
+
+      - name: Cherry-pick ONLY the scanned commit
+        run: |
+          git cherry-pick $SCANNED_SHA
+
+      - name: Push temp branch
+        run: |
+          git push origin $TEMP_BRANCH --force
+
+      - name: Create PR from temp branch to INT
+        id: cpr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const head = process.env.TEMP_BRANCH;
+            const base = "INT";
+
+            // Avoid duplicate PRs if re-run
+            const existing = await github.rest.pulls.list({
+              owner, repo, state: "open", head: `${owner}:${head}`, base
+            });
+
+            if (existing.data.length) {
+              core.info(`PR already exists: #${existing.data[0].number}`);
+              core.setOutput("pr_number", existing.data[0].number);
+              core.setOutput("pr_node_id", existing.data[0].node_id);
+              return;
+            }
+
+            const pr = await github.rest.pulls.create({
+              owner,
+              repo,
+              head,
+              base,
+              title: `Cherry-pick ${process.env.SCANNED_SHA} into INT`,
+              body: `Automated cherry-pick of scanned commit:\n\n- Commit: \`${process.env.SCANNED_SHA}\`\n- Source workflow run: \`${context.payload.workflow_run.id}\``
+            });
+
+            core.setOutput("pr_number", pr.data.number);
+            core.setOutput("pr_node_id", pr.data.node_id);
+
+      - name: Merge PR (SHA-locked)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const prNumber = Number(core.getInput('prNumber') || "${{ steps.cpr.outputs.pr_number }}");
+
+            const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+
+            // Ensure the head is still our temp branch HEAD (extra safety)
+            const expectedHead = pr.data.head.sha;
+
+            // SHA-locked merge so nothing changes mid-flight
+            await github.graphql(`
+              mutation($prId: ID!, $expected: GitObjectID!) {
+                mergePullRequest(input: {
+                  pullRequestId: $prId,
+                  mergeMethod: MERGE,
+                  expectedHeadOid: $expected
+                }) {
+                  pullRequest { number merged }
+                }
+              }
+            `, { prId: pr.data.node_id, expected: expectedHead });
