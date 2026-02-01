@@ -17,7 +17,7 @@ jobs:
     steps:
       - name: V2 PROOF – new workflow running
         run: |
-          echo "✅ Using PR body commit selection + CP marker conflict resolution"
+          echo "✅ Using PR body commit selection + automatic conflicted-file CP marker resolution"
           echo "workflow_run id = ${{ github.event.workflow_run.id }}"
           echo "workflow_run head_sha = ${{ github.event.workflow_run.head_sha }}"
 
@@ -27,7 +27,7 @@ jobs:
           echo "TEMP_BRANCH=cp-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
 
       # ------------------------------------------------------------
-      # 1) Identify PR + extract commit list
+      # 1) Identify PR + extract commit list from PR body
       # ------------------------------------------------------------
       - name: Get PR number + commit list from PR body
         env:
@@ -63,7 +63,7 @@ jobs:
           commits=[]
           for i,l in enumerate(lines):
               m=key_re.match(l)
-              if not m: 
+              if not m:
                   continue
               commits += sha_re.findall(m.group(1) or "")
               j=i+1
@@ -111,68 +111,88 @@ jobs:
           git checkout -b "$TEMP_BRANCH" "origin/INT1"
 
       # ------------------------------------------------------------
-      # 3) Cherry-pick with CP marker conflict resolution (NO HEREDOC)
+      # 3) Cherry-pick with automatic conflicted-file CP marker resolution
+      #    - On conflict: keep INT1 everywhere except within // CP_START..// CP_END blocks
       # ------------------------------------------------------------
-      - name: Cherry-pick selected commits (CP marker strategy)
+      - name: Cherry-pick selected commits (auto conflicted-file CP marker strategy)
         run: |
           set -euo pipefail
 
-          # ✅ Put all files that contain CP_START/CP_END markers here
-          FILES=(
-            "force-app/main/default/classes/AccountClass.cls"
-          )
-
-          apply_cp_blocks () {
+          apply_cp_blocks_to_conflicts () {
             local sha="$1"
-            echo "Applying CP blocks from SOURCE commit $sha onto TARGET (INT1)..."
+            echo "Applying CP blocks from SOURCE commit $sha to conflicted files only..."
+
+            # Conflicted files are those in unmerged state (U)
+            local conflict_files
+            conflict_files=$(git diff --name-only --diff-filter=U || true)
+
+            if [ -z "$conflict_files" ]; then
+              echo "No conflicted files detected (unexpected)."
+              return 0
+            fi
 
             mkdir -p /tmp/srcfiles
 
-            for f in "${FILES[@]}"; do
-              # source version of the file from the commit
-              if ! git show "$sha:$f" > "/tmp/srcfiles/$(basename "$f")"; then
-                echo "ERROR: File $f not found in commit $sha"
-                exit 1
+            # For each conflicted file:
+            # - Read SOURCE file from commit sha
+            # - Read TARGET file from origin/INT1
+            # - Produce resolved file = TARGET everywhere, but CP blocks copied from SOURCE
+            for f in $conflict_files; do
+              echo "Resolving conflicted file: $f"
+
+              # Ensure file exists in target branch (INT1)
+              if ! git show "origin/INT1:$f" > "/tmp/target_$(basename "$f")" 2>/dev/null; then
+                echo "WARN: File $f not found on origin/INT1. Skipping CP strategy for this file."
+                continue
               fi
 
-              # target version must exist in working tree
-              if [ ! -f "$f" ]; then
-                echo "ERROR: Target file missing on INT1: $f"
-                exit 1
+              # Ensure file exists in source commit
+              if ! git show "$sha:$f" > "/tmp/srcfiles/$(basename "$f")" 2>/dev/null; then
+                echo "WARN: File $f not found in commit $sha. Skipping CP strategy for this file."
+                continue
               fi
 
               python3 -c '
           import re, sys, pathlib
           
-          target_path = pathlib.Path(sys.argv[1])
-          source_path = pathlib.Path(sys.argv[2])
+          work_path = pathlib.Path(sys.argv[1])         # path in repo working tree
+          target_path = pathlib.Path(sys.argv[2])       # /tmp/target_file (INT1 version)
+          source_path = pathlib.Path(sys.argv[3])       # /tmp/srcfiles/file (commit version)
           
           target = target_path.read_text(encoding="utf-8", errors="replace")
           source = source_path.read_text(encoding="utf-8", errors="replace")
           
-          pat = re.compile(r"(//\s*CP_START[\\s\\S]*?//\s*CP_END)", re.DOTALL)
+          pat = re.compile(r"(//\s*CP_START[\s\S]*?//\s*CP_END)", re.DOTALL)
           
           t_blocks = pat.findall(target)
           s_blocks = pat.findall(source)
           
-          if not t_blocks:
-              raise SystemExit(f"No CP block found in TARGET {target_path}")
-          if not s_blocks:
-              raise SystemExit(f"No CP block found in SOURCE {source_path}")
-          if len(t_blocks) != len(s_blocks):
-              raise SystemExit(f"CP block count mismatch TARGET={len(t_blocks)} SOURCE={len(s_blocks)}")
+          # If markers are missing or mismatch, keep TARGET as-is (your requirement says INT wins outside CP lines)
+          if not t_blocks or not s_blocks or len(t_blocks) != len(s_blocks):
+              work_path.write_text(target, encoding="utf-8")
+              print(f"WARN: CP blocks missing/mismatch in {work_path}. Using TARGET (INT1) file entirely.")
+              raise SystemExit(0)
           
           new_target = target
           for old, new in zip(t_blocks, s_blocks):
               new_target = new_target.replace(old, new, 1)
           
-          target_path.write_text(new_target, encoding="utf-8")
-          print(f"Replaced {len(s_blocks)} CP block(s) in {target_path}")
-          ' "$f" "/tmp/srcfiles/$(basename "$f")"
+          work_path.write_text(new_target, encoding="utf-8")
+          print(f"Resolved {work_path}: SOURCE wins only inside CP blocks; TARGET elsewhere.")
+          ' "$f" "/tmp/target_$(basename "$f")" "/tmp/srcfiles/$(basename "$f")"
             done
 
-            git add "${FILES[@]}"
-            git commit -m "Apply CP blocks from $sha"
+            # Mark resolved files
+            git add $conflict_files
+
+            # If still conflicts remain, fail clearly
+            if git diff --name-only --diff-filter=U | grep -q .; then
+              echo "ERROR: Some conflicts remain after CP strategy:"
+              git diff --name-only --diff-filter=U
+              exit 1
+            fi
+
+            git commit -m "Resolve cherry-pick conflict for $sha using CP markers"
           }
 
           for sha in $COMMITS; do
@@ -180,9 +200,8 @@ jobs:
             if git cherry-pick "$sha"; then
               echo "Cherry-pick succeeded for $sha"
             else
-              echo "Cherry-pick conflict for $sha -> using CP marker strategy"
-              git cherry-pick --abort
-              apply_cp_blocks "$sha"
+              echo "Cherry-pick conflict for $sha -> auto resolving conflicted files with CP markers"
+              apply_cp_blocks_to_conflicts "$sha"
             fi
           done
 
@@ -227,9 +246,9 @@ jobs:
                 "Commits:",
                 ...commits.map(c => `- \`${c}\``),
                 "",
-                "Conflict strategy:",
-                "- Inside // CP_START..// CP_END: SOURCE wins",
-                "- Outside: TARGET (INT1) wins"
+                "Conflict strategy (only when conflicts occur):",
+                "- Uses INT1 version everywhere",
+                "- Except inside // CP_START..// CP_END blocks where SOURCE commit wins",
               ].join("\n")
             });
 
