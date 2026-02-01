@@ -24,7 +24,7 @@ jobs:
       - name: Checkout INT
         uses: actions/checkout@v4
         with:
-          ref: INT
+          ref: INT1
           fetch-depth: 0  # required for cherry-pick
 
       - name: Configure git
@@ -39,7 +39,7 @@ jobs:
 
       - name: Create temp branch from INT
         run: |
-          git checkout -b $TEMP_BRANCH origin/INT
+          git checkout -b $TEMP_BRANCH origin/INT1
 
       - name: Cherry-pick ONLY the scanned commit
         run: |
@@ -56,7 +56,7 @@ jobs:
           script: |
             const { owner, repo } = context.repo;
             const head = process.env.TEMP_BRANCH;
-            const base = "INT";
+            const base = "INT1";
 
             // Avoid duplicate PRs if re-run
             const existing = await github.rest.pulls.list({
