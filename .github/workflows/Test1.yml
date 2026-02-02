@@ -11,12 +11,6 @@ jobs:
     runs-on:
       group: cvs-linux-self-hosted
 
-    outputs:
-      scanner-report-path: ${{ steps.upload-report.outputs.artifact-path }}
-      block-pr: ${{ steps.block-check.outputs.block-status }}
-      runner-name: ${{ steps.get-runner.outputs.runner_name }}
-      commit-author: ${{ steps.commit-author.outputs.commit-author }}
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -54,7 +48,7 @@ jobs:
         run: sf plugins | grep code-analyzer
 
       # ------------------------------------------------------------
-      # A) Resolve diff range & collect changed files
+      # 1) Resolve the diff range and collect changed files by type
       # ------------------------------------------------------------
       - name: Resolve diff range & collect changed files
         id: collect-delta-files
@@ -77,7 +71,7 @@ jobs:
           changed_files=$(git diff --name-only $RANGE -- '*.cls' '*.js' '*.html' || true)
 
           if [[ -z "$changed_files" ]]; then
-            echo "⚠️ No changes detected for .cls/.js/.html. Exiting early."
+            echo "⚠️ No changes detected for .cls/.js/.html."
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
           else
             printf "%s\n" $changed_files | sort -u > changed_files.txt
@@ -87,7 +81,8 @@ jobs:
           fi
 
       # ------------------------------------------------------------
-      # B) Build delta-only temp files (Apex wrapped, JS/HTML minimal)
+      # 2) Get delta added lines & create temp files (Apex wrapper)
+      #    ✅ FIXED: mawk-safe awk (no match(..., ..., arr))
       # ------------------------------------------------------------
       - name: Get changed lines and create temporary files (delta, with Apex wrapper; no mapping)
         shell: bash
@@ -126,19 +121,27 @@ jobs:
 
             echo "Processing file: $file"
 
-            # Extract added lines with their new-file line numbers
+            # ✅ mawk-safe extraction of added lines + new-file line numbers
             git diff -U0 "$RANGE" -- "$file" | awk '
-              /^@@/{
-                if (match($0, /\+([0-9]+)(,([0-9]+))?/, m)) newLine=m[1]+0;
+              /^@@/ {
+                # Example: @@ -12,0 +45,3 @@
+                line = $0
+                sub(/^.*\+/, "", line)
+                sub(/,.*/, "", line)
+                newLine = line + 0
                 next
               }
               /^diff / || /^index / || /^--- / || /^\+\+\+ / { next }
-              /^\+/ { print newLine "\t" substr($0,2); newLine++; next }
-              /^-/ { next }
+              /^\+/ {
+                print newLine "\t" substr($0,2)
+                newLine++
+                next
+              }
             ' > lines.tmp || true
 
+            # If no added lines, skip (PR might be deletions only)
             if [[ ! -s lines.tmp ]]; then
-              echo "No valid added lines found for $file. Skipping..."
+              echo "No added lines found for $file (possibly only deletions). Skipping..."
               continue
             fi
 
@@ -154,6 +157,7 @@ jobs:
 
                 while IFS= read -r line; do
                   content="${line#*"$TAB"}"
+                  # Skip pure whitespace
                   if [[ -n "$(echo "$content" | sed 's/[[:space:]]//g')" ]]; then
                     printf "    %s\n" "$content" >> "$temp_file"
                   fi
@@ -209,22 +213,20 @@ jobs:
           fi
 
       # ------------------------------------------------------------
-      # ✅ FIX: Build files_to_scan.txt (this is what your run failed on)
+      # 3) ✅ FIX: Build files_to_scan.txt (prevents 'No such file')
       # ------------------------------------------------------------
       - name: Build files_to_scan.txt from temp files
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ ! -f changed_cls_lwc_files.txt ]]; then
-            echo "❌ changed_cls_lwc_files.txt not found"
-            exit 1
-          fi
+          : > files_to_scan.txt
 
-          # Only include existing files
-          while read -r f; do
-            [[ -n "$f" && -f "$f" ]] && echo "$f"
-          done < changed_cls_lwc_files.txt > files_to_scan.txt
+          if [[ -f changed_cls_lwc_files.txt && -s changed_cls_lwc_files.txt ]]; then
+            while read -r f; do
+              [[ -n "$f" && -f "$f" ]] && echo "$f"
+            done < changed_cls_lwc_files.txt > files_to_scan.txt
+          fi
 
           echo "====== files_to_scan.txt ======"
           if [[ -s files_to_scan.txt ]]; then
@@ -234,7 +236,7 @@ jobs:
           fi
 
       # ------------------------------------------------------------
-      # C) Run Code Analyzer v5 on the temp delta files + build a single CSV
+      # 4) Run Code Analyzer v5 on delta temp files and build CSV
       # ------------------------------------------------------------
       - name: Run SFDX Scanner (Code Analyzer v5)
         shell: bash
@@ -299,7 +301,7 @@ jobs:
                 --config-file code-analyzer.yml \
               || echo "⚠️ Code Analyzer failed for $file (continuing to build report)"
             else
-              # If you really want JS/HTML delta checks via ESLint engine:
+              # Optional JS/HTML delta scan via ESLint engine (requires eslint config in repo)
               sf code-analyzer run \
                 --workspace "$file" \
                 --engine eslint \
@@ -316,7 +318,7 @@ jobs:
           cat scanner-report.csv
 
       # ------------------------------------------------------------
-      # D) HARD FAIL gate (tweak thresholds here)
+      # 5) HARD FAIL gate (Apex Severity >= 3, JS/HTML Severity >= 2)
       # ------------------------------------------------------------
       - name: HARD FAIL – Block PR on Violations
         shell: bash
@@ -330,7 +332,6 @@ jobs:
 
           echo "🔍 Evaluating scanner-report.csv"
 
-          # Apex: block Severity >= 3
           apex=$(awk -F',' '
             NR>1 {
               sev=$2; file=$3
@@ -341,7 +342,6 @@ jobs:
             END { print c+0 }
           ' scanner-report.csv)
 
-          # JS/HTML: block Severity >= 2 (optional)
           lwc=$(awk -F',' '
             NR>1 {
               sev=$2; file=$3
