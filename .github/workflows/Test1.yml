@@ -85,6 +85,7 @@ jobs:
           echo "SOURCE_BRANCH=${SOURCE_BRANCH}" >> "$GITHUB_ENV"
           echo "COMMIT_LABEL=${COMMIT_LABEL}" >> "$GITHUB_ENV"
           FILE_TITLE="Code Scanner Report_${REPO_NAME}_${TARGET_BRANCH}_${COMMIT_LABEL}"
+
           echo "Target Branch = ${TARGET_BRANCH}"
           echo "Source Branch = ${SOURCE_BRANCH}"
           echo "FILE_TITLE=${FILE_TITLE}" >> $GITHUB_ENV
@@ -123,8 +124,7 @@ jobs:
           fi
 
       # ------------------------------------------------------------
-      # 2) Get delta added lines & create temp files
-      #    ✅ WITH mapping: line_number_mapping.txt (tempLine -> actualLine)
+      # 2) Get delta added lines & create temp files (WITH mapping)
       # ------------------------------------------------------------
       - name: Get changed lines and create temporary files (delta, with Apex wrapper; WITH mapping)
         shell: bash
@@ -265,6 +265,39 @@ jobs:
           head -n 50 line_number_mapping.txt || true
 
       # ------------------------------------------------------------
+      # DEBUG: Print Temp Wrapper Classes Used for Scanning (line-numbered)
+      # ------------------------------------------------------------
+      - name: DEBUG – Print Temp Wrapper Classes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -d temp_scanner_files ]]; then
+            echo "❌ temp_scanner_files directory not found"
+            exit 0
+          fi
+
+          echo "================ TEMP WRAPPER CLASSES ================"
+
+          found=0
+          for f in temp_scanner_files/*.cls; do
+            if [[ -f "$f" ]]; then
+              found=1
+              echo ""
+              echo "-----------------------------------------------------"
+              echo "FILE: $f"
+              echo "-----------------------------------------------------"
+              nl -ba "$f"
+            fi
+          done
+
+          if [[ "$found" -eq 0 ]]; then
+            echo "⚠️ No Apex temp wrapper classes found."
+          fi
+
+          echo "====================================================="
+
+      # ------------------------------------------------------------
       # 3) Build lookup map (basename|tempLine=actualLine)
       # ------------------------------------------------------------
       - name: Build Actual Line Lookup
@@ -312,7 +345,13 @@ jobs:
             echo "No files to scan."
           fi
 
-
+      # ------------------------------------------------------------
+      # 5) Run Code Analyzer v5 on delta temp files and build CSV
+      #    ✅ col12=CommitAuthor
+      #    ✅ col13=ActualLine
+      #    ✅ col14=TargetBranch
+      #    ✅ prints tmp.csv for debugging
+      # ------------------------------------------------------------
       - name: Run SFDX Scanner (Code Analyzer v5) + add ActualLine
         shell: bash
         run: |
@@ -326,11 +365,10 @@ jobs:
             done < actual_line_lookup.env
           fi
 
-          # Final header (NO NYA)
           echo "rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,CommitAuthor,ActualLine,TargetBranch" > scanner-report.csv
 
           if [[ ! -s files_to_scan.txt ]]; then
-            echo " Nothing to scan. Empty report created."
+            echo "Nothing to scan. Empty report created."
             exit 0
           fi
 
@@ -383,14 +421,22 @@ jobs:
                 --rule-selector ApexUnitTestClassShouldHaveAsserts \
                 --output-file tmp.csv \
                 --config-file code-analyzer.yml \
-              || echo " Code Analyzer failed for $file (continuing to build report)"
+              || echo "Code Analyzer failed for $file (continuing to build report)"
             else
               sf code-analyzer run \
                 --workspace "$file" \
                 --engine eslint \
                 --output-file tmp.csv \
-              || echo " ESLint analyzer failed for $file (continuing to build report)"
+              || echo "ESLint analyzer failed for $file (continuing to build report)"
             fi
+
+            echo "====== tmp.csv output for $file ======"
+            if [[ -f tmp.csv ]]; then
+              head -n 200 tmp.csv || true
+            else
+              echo "tmp.csv not produced."
+            fi
+            echo "====================================="
 
             if [[ -f tmp.csv ]]; then
               isTemp=0
@@ -400,6 +446,7 @@ jobs:
               tail -n +2 tmp.csv | while IFS= read -r row; do
                 [[ -z "$row" ]] && continue
 
+                # Code Analyzer v5 CSV: startLine is column 6
                 startLine=$(echo "$row" | awk -F',' '{print $6}' | tr -d '"')
                 actualLine="$startLine"
 
@@ -415,7 +462,7 @@ jobs:
             fi
           done < files_to_scan.txt
 
-          echo " Final Scanner Report:"
+          echo "Final Scanner Report (first 50):"
           head -n 50 scanner-report.csv
 
       - name: Authenticate with Salesforce
@@ -428,61 +475,54 @@ jobs:
             -d "username=${{ secrets.SF_USERNAME }}" \
             -d "password=${{ secrets.SF_PASSWORD }}" )
           SF_ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token')
-          if [ -z "$SF_ACCESS_TOKEN" ]; then
+          if [ -z "$SF_ACCESS_TOKEN" ] || [ "$SF_ACCESS_TOKEN" == "null" ]; then
             echo "Salesforce authentication failed."
+            echo "$response"
             exit 1
           fi
-          echo "$SF_ACCESS_TOKEN"
+          echo "::add-mask::$SF_ACCESS_TOKEN"
           echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
           echo "Successfully authenticated with Salesforce."
-          
 
       - name: Upload Scanner Report to Salesforce
         if: success()
         run: |
-            # Check if the scanner report contains violations (more than just the header)
-            violation_count=$(tail -n +2 scanner-report.csv | wc -l)
-            if [ "$violation_count" -eq 0 ]; then
-              echo "No violations found. Skipping Salesforce upload."
-              exit 0
-            fi
+          violation_count=$(tail -n +2 scanner-report.csv | wc -l)
+          if [ "$violation_count" -eq 0 ]; then
+            echo "No violations found. Skipping Salesforce upload."
+            exit 0
+          fi
 
-            echo "Uploading scanner report to Salesforce..."
+          echo "Uploading scanner report to Salesforce..."
+          response=$(curl -X POST "https://service360--arpoc2.sandbox.my.salesforce.com/services/data/v61.0/sobjects/ContentVersion" \
+            -H "Authorization: Bearer $SF_ACCESS_TOKEN" \
+            -H "Content-Type: multipart/form-data" \
+            -F "entity_content={\"Title\": \"${{ env.FILE_TITLE }}\", \"PathOnClient\": \"scanner-report.csv\"};type=application/json" \
+            -F "VersionData=@scanner-report.csv;type=text/csv")
 
-            # Send file to Salesforce
-            response=$(curl -X POST "https://service360--arpoc2.sandbox.my.salesforce.com/services/data/v61.0/sobjects/ContentVersion" \
-              -H "Authorization: Bearer $SF_ACCESS_TOKEN" \
-              -H "Content-Type: multipart/form-data" \
-              -F "entity_content={\"Title\": \"${{ env.FILE_TITLE }}\", \"PathOnClient\": \"scanner-report.csv\"};type=application/json" \
-              -F "VersionData=@scanner-report.csv;type=text/csv")
+          echo "Salesforce API Response: $response"
 
-             # 🔍 Debug: Print the full API response
-            echo " Salesforce API Response: $response"
-            # Extract the ID safely (handles both array & object responses)
-            contentVersionId=$(echo "$response" | jq -r 'if type=="array" then .[0].id else .id end' 2>/dev/null || echo "null")
+          contentVersionId=$(echo "$response" | jq -r 'if type=="array" then .[0].id else .id end' 2>/dev/null || echo "null")
+          if [[ "$contentVersionId" == "null" || -z "$contentVersionId" ]]; then
+            echo "Error: Failed to extract ContentVersion ID from response."
+            exit 1
+          fi
 
-            #contentVersionId=$(echo "$response" | jq -r '.id // empty')
-        
-            if [[ "$contentVersionId" == "null" || -z "$contentVersionId" ]]; then
-              echo "Error: Failed to extract ContentVersion ID from response."
-              echo "Full API Response: $response"  # Log full response for debugging
-              exit 1
-            fi
-        
-            echo "Successfully uploaded scanner report to Salesforce." 
-  
+          echo "Successfully uploaded scanner report to Salesforce."
+
       - name: Ensure Scanner Report Exists
-        if: always()  # ✅ Ensures it runs even if commit is blocked
+        if: always()
         run: |
-            if [ ! -s scanner-report.csv ]; then
-              echo "No scanner report generated, creating a dummy report."
-              echo "rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,Commit,ActualLine,TargetBranch" > scanner-report.csv
-            fi
+          if [ ! -s scanner-report.csv ]; then
+            echo "scanner-report.csv missing or empty. Creating placeholder."
+            echo "rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,CommitAuthor,ActualLine,TargetBranch" > scanner-report.csv
+          fi
+
       - name: Debug - List Files Before Upload
         if: always()
         run: |
-            echo "Listing files before uploading scanner report:"
-            ls -lah
+          echo "Listing files:"
+          ls -lah
 
       - name: Commit and Push Scanner Report to `Scanner_Reports` Branch
         if: always()
@@ -490,9 +530,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # If report doesn't exist, create a tiny placeholder (so commit step never breaks)
           if [[ ! -s scanner-report.csv ]]; then
-            echo " scanner-report.csv missing or empty. Creating placeholder."
+            echo "scanner-report.csv missing or empty. Creating placeholder."
             echo "rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,CommitAuthor,ActualLine,TargetBranch" > scanner-report.csv
           fi
 
@@ -500,25 +539,21 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           BRANCH_NAME="Scanner_Reports"
-          echo " Target Branch: $BRANCH_NAME"
+          echo "Target Branch: $BRANCH_NAME"
 
-          # Make sure we can switch branches without losing generated files
           git stash push --include-untracked -m "stash scanner report" || true
 
-          # Ensure branch exists
           if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
-            echo " Remote branch $BRANCH_NAME exists."
+            echo "Remote branch $BRANCH_NAME exists."
             git fetch origin "$BRANCH_NAME":"$BRANCH_NAME"
             git checkout "$BRANCH_NAME"
           else
-            echo " Remote branch $BRANCH_NAME does not exist. Creating it..."
+            echo "Remote branch $BRANCH_NAME does not exist. Creating it..."
             git checkout -b "$BRANCH_NAME"
             git push --set-upstream origin "$BRANCH_NAME"
           fi
 
           git pull origin "$BRANCH_NAME" --rebase || true
-
-          # Restore scanner report from stash
           git stash pop || true
 
           mkdir -p Artifact
@@ -526,30 +561,35 @@ jobs:
           cp scanner-report.csv "$OUTFILE"
 
           git add "$OUTFILE"
-          git commit -m " Add scanner report (PR #${{ github.event.pull_request.number }}, run ${{ github.run_id }})" || echo "No changes to commit"
+          git commit -m "Add scanner report (PR #${{ github.event.pull_request.number }}, run ${{ github.run_id }})" || echo "No changes to commit"
           git push origin "$BRANCH_NAME"
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
 
-
+      # ------------------------------------------------------------
+      # 6) HARD FAIL gate (FIXED for Code Analyzer v5 severity scale)
+      #    In CA v5: 1=highest, 5=lowest
+      #    Block Apex if severity <= 2
+      #    Block JS/HTML if severity <= 2
+      # ------------------------------------------------------------
       - name: HARD FAIL Block PR on Violations
         shell: bash
         run: |
           set -euo pipefail
 
           if [[ ! -f scanner-report.csv ]]; then
-            echo " scanner-report.csv not found"
+            echo "scanner-report.csv not found"
             exit 1
           fi
 
-          echo "🔍 Evaluating scanner-report.csv"
+          echo "Evaluating scanner-report.csv"
 
           apex=$(awk -F',' '
             NR>1 {
               sev=$3; file=$5
               gsub(/"/,"",sev); gsub(/"/,"",file)
               sev_num = sev + 0
-              if (sev_num >= 3 && file ~ /\.cls$/) c++
+              if (sev_num > 0 && sev_num <= 2 && file ~ /\.cls$/) c++
             }
             END { print c+0 }
           ' scanner-report.csv)
@@ -559,19 +599,19 @@ jobs:
               sev=$3; file=$5
               gsub(/"/,"",sev); gsub(/"/,"",file)
               sev_num = sev + 0
-              if (sev_num >= 2 && file ~ /\.(js|html)$/) c++
+              if (sev_num > 0 && sev_num <= 2 && file ~ /\.(js|html)$/) c++
             }
             END { print c+0 }
           ' scanner-report.csv)
 
-          echo "Apex Severity >= 3 Issues : $apex"
-          echo "JS/HTML Severity >= 2 Issues : $lwc"
+          echo "Apex Severity <= 2 Issues : $apex"
+          echo "JS/HTML Severity <= 2 Issues : $lwc"
 
           if [[ "$apex" -gt 0 || "$lwc" -gt 0 ]]; then
-            echo " HARD GATE FAILED BLOCKING PR"
+            echo "HARD GATE FAILED - BLOCKING PR"
             echo "---- Violations (first 200 lines) ----"
             sed -n '1,200p' scanner-report.csv || true
             exit 1
           fi
 
-          echo " HARD GATE PASSED PR CAN MERGE"
+          echo "HARD GATE PASSED - PR CAN MERGE"
