@@ -1,627 +1,134 @@
-name: Apex PMD Scan (PRs, CSV, fail-on-violation)
-
-on:
-  pull_request:
-    branches:
-      - "**"
-
-jobs:
-  apex-pmd-scan-pull:
-    name: apex-pmd-scan-pull
-    runs-on:
-      group: cvs-linux-self-hosted
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install ESLint and Compatible Dependencies
-        run: npm install eslint --save-dev --legacy-peer-deps
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Install Salesforce CLI
-        run: npm install @salesforce/cli --global
-
-      - name: Disable Auto Plugin Install
-        run: |
-          mkdir -p ~/.sf
-          echo '{"plugins":{"autoInstall":false}}' > ~/.sf/sf-config.json
-
-      - name: Install Code Analyzer Plugin v5
-        run: |
-          sf plugins uninstall @salesforce/plugin-code-analyzer || true
-          sf plugins install @salesforce/plugin-code-analyzer@5.1.0
-
-      - name: Confirm Only v5 Plugin
-        run: sf plugins | grep code-analyzer
-
-      - name: Get Commit Author
-        id: commit-author
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          AUTHOR_RAW="$(git log -1 --pretty=format:'%an')"
-          AUTHOR_EMAIL="$(git log -1 --pretty=format:'%ae')"
-          COMMITTER_NAME="$(git log -1 --pretty=format:'%cn')"
-          COMMITTER_EMAIL="$(git log -1 --pretty=format:'%ce')"
-
-          echo "Author (raw): $AUTHOR_RAW <$AUTHOR_EMAIL>"
-          echo "Committer: $COMMITTER_NAME <$COMMITTER_EMAIL>"
-
-          # ✅ Fix "Lastname, Firstname" -> "Firstname Lastname"
-          if [[ "$AUTHOR_RAW" == *","* ]]; then
-            last="$(echo "$AUTHOR_RAW" | cut -d',' -f1 | xargs)"
-            first="$(echo "$AUTHOR_RAW" | cut -d',' -f2- | xargs)"
-            AUTHOR_FMT="${first} ${last}"
-          else
-            AUTHOR_FMT="$AUTHOR_RAW"
-          fi
-
-          echo "Author (formatted): $AUTHOR_FMT"
-
-          echo "commit-author=$AUTHOR_FMT" >> "$GITHUB_OUTPUT"
-          echo "GITHUB_USERNAME=$AUTHOR_FMT" >> "$GITHUB_ENV"
-          echo "COMMIT_AUTHOR=$AUTHOR_FMT" >> "$GITHUB_ENV"
-
-      - name: Get Repository and Branch Info
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          REPO_NAME="$(echo "${GITHUB_REPOSITORY}" | cut -d'/' -f2)"
-
-          # ✅ Target branch for PRs (base branch)
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            TARGET_BRANCH="${GITHUB_BASE_REF}"
-            SOURCE_BRANCH="${GITHUB_HEAD_REF}"
-          else
-            TARGET_BRANCH="${GITHUB_REF#refs/heads/}"
-            SOURCE_BRANCH="${TARGET_BRANCH}"
-          fi
-
-          COMMIT_LABEL="$(git log -1 --pretty=format:'%s')"
-
-          echo "REPO_NAME=${REPO_NAME}" >> "$GITHUB_ENV"
-          echo "TARGET_BRANCH=${TARGET_BRANCH}" >> "$GITHUB_ENV"
-          echo "SOURCE_BRANCH=${SOURCE_BRANCH}" >> "$GITHUB_ENV"
-          echo "COMMIT_LABEL=${COMMIT_LABEL}" >> "$GITHUB_ENV"
-
-          FILE_TITLE="Code Scanner Report_${REPO_NAME}_${TARGET_BRANCH}_${COMMIT_LABEL}"
-          echo "FILE_TITLE=${FILE_TITLE}" >> "$GITHUB_ENV"
-
-          echo "Target Branch = ${TARGET_BRANCH}"
-          echo "Source Branch = ${SOURCE_BRANCH}"
-          echo "FILE_TITLE = ${FILE_TITLE}"
-
-      # ------------------------------------------------------------
-      # 1) Resolve the diff range and collect changed files by type
-      # ------------------------------------------------------------
-      - name: Resolve diff range & collect changed files
-        id: collect-delta-files
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "Resolving diff range..."
-          git fetch --no-tags --prune --depth=50 origin +refs/heads/*:refs/remotes/origin/*
-
-          if [[ "${{ github.event_name }}" == "pull_request" && -n "${{ github.base_ref }}" ]]; then
-            RANGE="origin/${{ github.base_ref }}...${{ github.sha }}"
-            echo "Using PR diff range: $RANGE"
-          else
-            RANGE="HEAD~1..HEAD"
-            echo "Using fallback diff range: $RANGE"
-          fi
-          echo "RANGE=$RANGE" >> "$GITHUB_OUTPUT"
-
-          changed_files=$(git diff --name-only $RANGE -- '*.cls' '*.js' '*.html' || true)
-
-          if [[ -z "$changed_files" ]]; then
-            echo "⚠️ No changes detected for .cls/.js/.html."
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          else
-            printf "%s\n" $changed_files | sort -u > changed_files.txt
-            echo "Detected changed files:"
-            cat changed_files.txt
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      # ------------------------------------------------------------
-      # 2) Get delta added lines & create temp files
-      #    ✅ WITH mapping: line_number_mapping.txt (tempLine -> actualLine)
-      # ------------------------------------------------------------
-      - name: Get changed lines and create temporary files (delta, with Apex wrapper; WITH mapping)
-        shell: bash
-        id: get-changes
-        run: |
-          set -euo pipefail
-
-          mkdir -p temp_scanner_files
-          : > changed_cls_lwc_files.txt
-          : > line_number_mapping.txt
-
-          echo "Checking for changed .cls, .js, .html files..."
-
-          if [[ "${{ github.event_name }}" == "pull_request" && -n "${{ github.base_ref }}" ]]; then
-            RANGE="origin/${{ github.base_ref }}...${{ github.sha }}"
-            echo "Using PR diff: $RANGE"
-            git fetch --no-tags --prune origin +refs/heads/*:refs/remotes/origin/*
-          else
-            RANGE="HEAD~1..HEAD"
-            echo "Using fallback diff: $RANGE"
-          fi
-
-          changed_files=$(git diff --name-only "$RANGE" -- '*.cls' '*.js' '*.html' || true)
-          echo "Detected changed files: ${changed_files:-<none>}"
-
-          if [[ -z "${changed_files}" ]]; then
-            echo "No .cls/.js/.html files detected."
-            echo "rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,CommitAuthor,ActualLine,TargetBranch" > scanner-report.csv
-            exit 0
-          fi
-
-          TAB=$(printf '\t')
-
-          for file in $changed_files; do
-            [[ -f "$file" ]] || { echo "Skipping deleted file: $file"; continue; }
-
-            echo "Processing file: $file"
-
-            # ✅ mawk-safe extraction: actualLine<TAB>content
-            git diff -U0 "$RANGE" -- "$file" | awk '
-              /^@@/ {
-                line = $0
-                sub(/^.*\+/, "", line)
-                sub(/,.*/, "", line)
-                newLine = line + 0
-                next
-              }
-              /^diff / || /^index / || /^--- / || /^\+\+\+ / { next }
-              /^\+/ {
-                print newLine "\t" substr($0,2)
-                newLine++
-                next
-              }
-            ' > lines.tmp || true
-
-            if [[ ! -s lines.tmp ]]; then
-              echo "No added lines found for $file (possibly only deletions). Skipping..."
-              continue
-            fi
-
-            sanitized="${file//\//_}"
-
-            case "$file" in
-              *.cls)
-                temp_file="temp_scanner_files/temp_${sanitized%.cls}.cls"
-
-                echo "public with sharing class TempWrapper_${sanitized//[^A-Za-z0-9_]/_} {" > "$temp_file"
-                temp_line=1
-                echo "$temp_file,$temp_line,0" >> line_number_mapping.txt
-                ((temp_line++))
-
-                echo "  public static void tempMethod() {" >> "$temp_file"
-                echo "$temp_file,$temp_line,0" >> line_number_mapping.txt
-                ((temp_line++))
-
-                while IFS= read -r row; do
-                  actual_line="${row%%$TAB*}"
-                  content="${row#*"$TAB"}"
-
-                  if [[ -z "$(echo "$content" | tr -d '[:space:]')" ]]; then
-                    continue
-                  fi
-
-                  printf "    %s\n" "$content" >> "$temp_file"
-                  echo "$temp_file,$temp_line,$actual_line" >> line_number_mapping.txt
-                  ((temp_line++))
-                done < lines.tmp
-
-                echo "  }" >> "$temp_file"
-                echo "$temp_file,$temp_line,0" >> line_number_mapping.txt
-                ((temp_line++))
-
-                echo "}" >> "$temp_file"
-                echo "$temp_file,$temp_line,0" >> line_number_mapping.txt
-
-                echo "$temp_file" >> changed_cls_lwc_files.txt
-                echo "Created temp file: $temp_file"
-                ;;
-              *.js)
-                temp_file="temp_scanner_files/temp_${sanitized%.js}.js"
-                echo "/* delta-only temp JS */" > "$temp_file"
-                while IFS= read -r row; do
-                  content="${row#*"$TAB"}"
-                  if [[ -n "$(echo "$content" | sed 's/[[:space:]]//g')" ]]; then
-                    printf "%s\n" "$content" >> "$temp_file"
-                  fi
-                done < lines.tmp
-                echo "$temp_file" >> changed_cls_lwc_files.txt
-                ;;
-              *.html)
-                temp_file="temp_scanner_files/temp_${sanitized%.html}.html"
-                echo "<template>" > "$temp_file"
-                while IFS= read -r row; do
-                  content="${row#*"$TAB"}"
-                  if [[ -n "$(echo "$content" | sed 's/[[:space:]]//g')" ]]; then
-                    printf "%s\n" "$content" >> "$temp_file"
-                  fi
-                done < lines.tmp
-                echo "</template>" >> "$temp_file"
-                echo "$temp_file" >> changed_cls_lwc_files.txt
-                ;;
-              *)
-                echo "Unhandled type for $file; skipping."
-                continue
-                ;;
-            esac
-          done
-
-          echo "====== Generated files list ======"
-          if [[ -s changed_cls_lwc_files.txt ]]; then
-            cat changed_cls_lwc_files.txt
-          else
-            echo "No temp files created. Exiting."
-            exit 0
-          fi
-
-          echo "====== line_number_mapping.txt (first 50) ======"
-          head -n 50 line_number_mapping.txt || true
-
-      # ------------------------------------------------------------
-      # 2.1) ✅ Print the temp wrapper classes (what scanner runs on)
-      # ------------------------------------------------------------
-      - name: Print temp wrapper class files (debug)
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "====== TEMP WRAPPER FILES (first 200 lines each) ======"
-          if [[ -d temp_scanner_files ]] && compgen -G "temp_scanner_files/*.cls" > /dev/null; then
-            for f in temp_scanner_files/*.cls; do
-              echo "----- $f -----"
-              sed -n '1,200p' "$f" || true
-              echo
-            done
-          else
-            echo "No temp .cls wrapper files found."
-          fi
-
-      # ------------------------------------------------------------
-      # 3) Build lookup map (basename|tempLine=actualLine)
-      # ------------------------------------------------------------
-      - name: Build Actual Line Lookup
-        shell: bash
-        run: |
-          set -euo pipefail
-          : > actual_line_lookup.env
-
-          if [[ -s line_number_mapping.txt ]]; then
-            awk -F',' '
-              {
-                fullpath=$1
-                tempLine=$2
-                actualLine=$3
-                n=split(fullpath, arr, "/")
-                file=arr[n]
-                print file "|" tempLine "=" actualLine
-              }
-            ' line_number_mapping.txt > actual_line_lookup.env
-          fi
-
-          echo "=== ACTUAL LINE LOOKUP (first 50) ==="
-          head -n 50 actual_line_lookup.env || true
-
-      # ------------------------------------------------------------
-      # 4) Build files_to_scan.txt
-      # ------------------------------------------------------------
-      - name: Build files_to_scan.txt from temp files
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          : > files_to_scan.txt
-
-          if [[ -f changed_cls_lwc_files.txt && -s changed_cls_lwc_files.txt ]]; then
-            while read -r f; do
-              [[ -n "$f" && -f "$f" ]] && echo "$f"
-            done < changed_cls_lwc_files.txt > files_to_scan.txt
-          fi
-
-          echo "====== files_to_scan.txt ======"
-          if [[ -s files_to_scan.txt ]]; then
-            cat files_to_scan.txt
-          else
-            echo "No files to scan."
-          fi
-
-      # ------------------------------------------------------------
-      # 5) Run Code Analyzer v5 on delta temp files and build CSV
-      #    ✅ CommitAuthor = col12
-      #    ✅ ActualLine  = col13
-      #    ✅ TargetBranch= col14
-      # ------------------------------------------------------------
-      - name: Run SFDX Scanner (Code Analyzer v5) + add ActualLine
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # Load lookup into memory
-          declare -A ACTUAL_LINE_MAP
-          if [[ -s actual_line_lookup.env ]]; then
-            while IFS='=' read -r key value; do
-              ACTUAL_LINE_MAP["$key"]="$value"
-            done < actual_line_lookup.env
-          fi
-
-          # Final header
-          echo "rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,CommitAuthor,ActualLine,TargetBranch" > scanner-report.csv
-
-          if [[ ! -s files_to_scan.txt ]]; then
-            echo "Nothing to scan. Empty report created."
-            exit 0
-          fi
-
-          while read -r file; do
-            [[ -z "$file" ]] && continue
-            echo "🔍 Scanning $file"
-            rm -f tmp.csv
-
-            if [[ "$file" == *.cls ]]; then
-              sf code-analyzer run \
-                --workspace "$file" \
-                --rule-selector ApexCRUDViolation \
-                --rule-selector ApexBadCrypto \
-                --rule-selector ApexDangerousMethods \
-                --rule-selector ApexInsecureEndpoint \
-                --rule-selector ApexOpenRedirect \
-                --rule-selector ApexSharingViolations \
-                --rule-selector ApexSOQLInjection \
-                --rule-selector ApexSuggestUsingNamedCred \
-                --rule-selector ApexXSSFromEscapeFalse \
-                --rule-selector ApexXSSFromURLParam \
-                --rule-selector AvoidDebugStatements \
-                --rule-selector AvoidNonRestrictiveQueries \
-                --rule-selector EagerlyLoadedDescribeSObjectResult \
-                --rule-selector OperationWithHighCostInLoop \
-                --rule-selector OperationWithLimitsInLoop \
-                --rule-selector ApexCSRF \
-                --rule-selector AvoidDirectAccessTriggerMap \
-                --rule-selector AvoidHardcodingId \
-                --rule-selector EmptyCatchBlock \
-                --rule-selector UnusedLocalVariable \
-                --rule-selector QueueableWithoutFinalizer \
-                --rule-selector IfElseStmtsMustUseBraces \
-                --rule-selector ForLoopsMustUseBraces \
-                --rule-selector AvoidDeeplyNestedIfStmts \
-                --rule-selector DebugsShouldUseLoggingLevel \
-                --rule-selector ApexUnitTestShouldNotUseSeeAllDataTrue \
-                --rule-selector EmptyStatementBlock \
-                --rule-selector EmptyTryOrFinallyBlock \
-                --rule-selector CognitiveComplexity \
-                --rule-selector TooManyFields \
-                --rule-selector ExcessiveParameterList \
-                --rule-selector ExcessiveClassLength \
-                --rule-selector NcssConstructorCount \
-                --rule-selector NcssMethodCount \
-                --rule-selector NcssTypeCount \
-                --rule-selector ExcessivePublicCount \
-                --rule-selector CyclomaticComplexity \
-                --rule-selector StdCyclomaticComplexity \
-                --rule-selector ApexUnitTestClassShouldHaveAsserts \
-                --output-file tmp.csv \
-                --config-file code-analyzer.yml \
-              || echo "Code Analyzer failed for $file (continuing to build report)"
-            else
-              sf code-analyzer run \
-                --workspace "$file" \
-                --engine eslint \
-                --output-file tmp.csv \
-              || echo "ESLint analyzer failed for $file (continuing to build report)"
-            fi
-
-            if [[ -f tmp.csv ]]; then
-              isTemp=0
-              [[ "$file" == temp_scanner_files/* ]] && isTemp=1
-              tempBase="$(basename "$file")"
-
-              tail -n +2 tmp.csv | while IFS= read -r row; do
-                [[ -z "$row" ]] && continue
-
-                # Code Analyzer CSV columns: startLine is column 6
-                startLine=$(echo "$row" | awk -F',' '{print $6}' | tr -d '"')
-                actualLine="$startLine"
-
-                if [[ "$isTemp" -eq 1 ]]; then
-                  key="${tempBase}|${startLine}"
-                  mapped="${ACTUAL_LINE_MAP[$key]}"
-                  [[ -z "$mapped" || "$mapped" == "0" ]] && mapped="N/A"
-                  actualLine="$mapped"
-                fi
-
-                # ✅ Commit author is safe (no commas now), still quote it for CSV safety
-                echo "${row},\"${COMMIT_AUTHOR}\",${actualLine},${TARGET_BRANCH}" >> scanner-report.csv
-              done
-            fi
-          done < files_to_scan.txt
-
-          echo "Final Scanner Report (first 50 lines):"
-          head -n 50 scanner-report.csv
-
-      - name: Authenticate with Salesforce
-        id: sf-auth
-        run: |
-          response=$(curl -X POST "https://test.salesforce.com/services/oauth2/token" \
-            -d "grant_type=password" \
-            -d "client_id=${{ secrets.SF_CLIENT_ID }}" \
-            -d "client_secret=${{ secrets.SF_CLIENT_SECRET }}" \
-            -d "username=${{ secrets.SF_USERNAME }}" \
-            -d "password=${{ secrets.SF_PASSWORD }}" )
-          SF_ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token')
-          if [ -z "$SF_ACCESS_TOKEN" ] || [ "$SF_ACCESS_TOKEN" == "null" ]; then
-            echo "Salesforce authentication failed."
-            exit 1
-          fi
-          echo "::add-mask::$SF_ACCESS_TOKEN"
-          echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
-          echo "Successfully authenticated with Salesforce."
-
-      - name: Upload Scanner Report to Salesforce
-        if: success()
-        run: |
-          violation_count=$(tail -n +2 scanner-report.csv | wc -l)
-          if [ "$violation_count" -eq 0 ]; then
-            echo "No violations found. Skipping Salesforce upload."
-            exit 0
-          fi
-
-          echo "Uploading scanner report to Salesforce..."
-          response=$(curl -X POST "https://service360--arpoc2.sandbox.my.salesforce.com/services/data/v61.0/sobjects/ContentVersion" \
-            -H "Authorization: Bearer $SF_ACCESS_TOKEN" \
-            -H "Content-Type: multipart/form-data" \
-            -F "entity_content={\"Title\": \"${{ env.FILE_TITLE }}\", \"PathOnClient\": \"scanner-report.csv\"};type=application/json" \
-            -F "VersionData=@scanner-report.csv;type=text/csv")
-
-          echo "Salesforce API Response: $response"
-          contentVersionId=$(echo "$response" | jq -r 'if type=="array" then .[0].id else .id end' 2>/dev/null || echo "null")
-
-          if [[ "$contentVersionId" == "null" || -z "$contentVersionId" ]]; then
-            echo "Error: Failed to extract ContentVersion ID from response."
-            echo "Full API Response: $response"
-            exit 1
-          fi
-
-          echo "Successfully uploaded scanner report to Salesforce."
-
-      - name: Ensure Scanner Report Exists
-        if: always()
-        run: |
-          if [ ! -s scanner-report.csv ]; then
-            echo "No scanner report generated, creating a dummy report."
-            echo "rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,CommitAuthor,ActualLine,TargetBranch" > scanner-report.csv
-          fi
-
-      - name: Debug - List Files Before Upload
-        if: always()
-        run: |
-          echo "Listing files before uploading scanner report:"
-          ls -lah
-
-      - name: Commit and Push Scanner Report to `Scanner_Reports` Branch
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ ! -s scanner-report.csv ]]; then
-            echo "scanner-report.csv missing or empty. Creating placeholder."
-            echo "rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,CommitAuthor,ActualLine,TargetBranch" > scanner-report.csv
-          fi
-
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-          BRANCH_NAME="Scanner_Reports"
-          echo "Target Branch: $BRANCH_NAME"
-
-          git stash push --include-untracked -m "stash scanner report" || true
-
-          if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
-            echo "Remote branch $BRANCH_NAME exists."
-            git fetch origin "$BRANCH_NAME":"$BRANCH_NAME"
-            git checkout "$BRANCH_NAME"
-          else
-            echo "Remote branch $BRANCH_NAME does not exist. Creating it..."
-            git checkout -b "$BRANCH_NAME"
-            git push --set-upstream origin "$BRANCH_NAME"
-          fi
-
-          git pull origin "$BRANCH_NAME" --rebase || true
-          git stash pop || true
-
-          mkdir -p Artifact
-          OUTFILE="Artifact/scanner-report-pr-${{ github.event.pull_request.number }}-run-${{ github.run_id }}.csv"
-          cp scanner-report.csv "$OUTFILE"
-
-          git add "$OUTFILE"
-          git commit -m "Add scanner report (PR #${{ github.event.pull_request.number }}, run ${{ github.run_id }})" || echo "No changes to commit"
-          git push origin "$BRANCH_NAME"
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-
-      # ------------------------------------------------------------
-      # 6) HARD FAIL + print severity buckets
-      # ------------------------------------------------------------
-      - name: HARD FAIL Block PR on Violations
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ ! -f scanner-report.csv ]]; then
-            echo "scanner-report.csv not found"
-            exit 1
-          fi
-
-          echo "🔍 Evaluating scanner-report.csv"
-
-          sev1_2_count=$(awk -F',' '
-            NR>1 {
-              sev=$3; gsub(/"/,"",sev);
-              if (sev ~ /^[0-9]+$/ && sev >= 1 && sev <= 2) c++
+public with sharing class File {
+
+    public static void processNewFiles(List<ContentVersion> contentVersions) {
+        List<Id> contentDocIds = new List<Id>();
+		System.debug('Triggering calling the method');
+        for (ContentVersion file : contentVersions) {
+            if (file.ContentDocumentId != null) {
+                contentDocIds.add(file.ContentDocumentId);
             }
-            END { print c+0 }
-          ' scanner-report.csv)
+        }
+		System.debug('ContentDocIds'+contentDocIds);
+        if (!contentDocIds.isEmpty()) {
+            importVulnerabilityData(contentDocIds);
+        }
+    }
 
-          sev3_5_count=$(awk -F',' '
-            NR>1 {
-              sev=$3; gsub(/"/,"",sev);
-              if (sev ~ /^[0-9]+$/ && sev >= 3 && sev <= 5) c++
+    public static void importVulnerabilityData(List<Id> contentDocIds) {
+        System.debug('ContentDocIds inside vulneribility method'+contentDocIds);
+        try {
+            List<ContentVersion> fileList = [
+                SELECT Id, VersionData, ContentDocumentId
+                FROM ContentVersion
+                WHERE ContentDocumentId IN :contentDocIds
+                ORDER BY CreatedDate DESC
+            ];
+
+            if (fileList.isEmpty()) return;
+			System.debug('file list not empty');
+            List<Vulnerability__c> newRecords = new List<Vulnerability__c>();
+			System.debug('empty vulnerbility list');
+            for (ContentVersion file : fileList) {
+                if (file.VersionData == null) continue;
+				
+                String csvContent = file.VersionData.toString();
+                List<String> lines = csvContent.split('\n');
+                if (lines.isEmpty()) continue;
+				System.debug('csvContent' +csvContent);
+                // Parse headers
+                List<String> headers = parseCSVLine(lines[0]);
+                Map<String, Integer> columnMap = new Map<String, Integer>();
+				System.debug('Parsing headers');
+                for (Integer i = 0; i < headers.size(); i++) {
+                    columnMap.put(headers[i].trim().toLowerCase(), i);  // Case-insensitive mapping
+                }
+				
+                // V5 field mapping
+                Map<String, String> fieldMappings = new Map<String, String>{
+                    'rule'         => 'rule',
+                    'engine'       => 'engine',
+                    'severity'     => 'severity',
+                    'tags'         => 'category',
+                    'file'         => 'file',
+                    'startline'    => 'line',
+                    'startcolumn'  => 'column',
+                    'message'      => 'description',
+                    'resources'    => 'url',
+                    'commit'       => 'commit',
+                    'commitauthorfirstname' => 'commit author firstname',
+                    'actualline'   => 'actual line',
+                    'targetbranch' => 'target branch'
+                };
+
+                // Validate required headers
+                for (String key : fieldMappings.keySet()) {
+                    if (!columnMap.containsKey(key)) {
+                        System.debug('⚠️ Missing required column: ' + key);
+                        continue;
+                    }
+                }
+				System.debug('Continue');
+                System.debug('Lines size'+lines.size());
+                for (Integer i = 1; i < lines.size(); i++) {
+                    List<String> columns = parseCSVLine(lines[i]);
+                    System.debug('columns size'+columns.size());
+                    System.debug('headers size'+headers.size());
+                    if (columns.size() < headers.size()){
+                        System.debug('size diff');
+                        continue;
+                    }
+                    System.debug('after continue');
+                    Vulnerability__c vuln = new Vulnerability__c();
+                    vuln.Rule__c          = columns[columnMap.get('rule')].trim();
+                    vuln.Engine__c        = columns[columnMap.get('engine')].trim();
+                    vuln.Severity__c      = columns[columnMap.get('severity')].trim();
+                    vuln.Category__c      = columns[columnMap.get('tags')].trim();
+                    vuln.File__c          = columns[columnMap.get('file')].trim();
+                    vuln.Line__c          = columns[columnMap.get('startline')].trim();
+                    vuln.Column__c        = columns[columnMap.get('startcolumn')].trim();
+                    vuln.Description__c   = columns[columnMap.get('message')].trim();
+                    vuln.URL__c           = columns[columnMap.get('resources')].trim();
+                    vuln.Commit__c        = columns[columnMap.get('commit')].trim();
+                    vuln.CommitAuthorFirstName__c = columns[columnMap.get('commitauthorfirstname')].trim();
+                    vuln.ActualLine__c    = columns[columnMap.get('actualline')].trim();
+                    vuln.TargetBranch__c  = columns[columnMap.get('targetbranch')].trim();
+					System.debug('Vulnera created list' +vuln);
+                    newRecords.add(vuln);
+                }
             }
-            END { print c+0 }
-          ' scanner-report.csv)
+            System.debug('Record created list' +newRecords);
+            System.debug('Record created size' +newRecords.size());
 
-          apex_fail=$(awk -F',' '
-            NR>1 {
-              sev=$3; file=$5
-              gsub(/"/,"",sev); gsub(/"/,"",file)
-              if (sev ~ /^[0-9]+$/ && sev >= 3 && file ~ /\.cls$/) c++
+            if (!newRecords.isEmpty()) {
+                insert newRecords;
+                System.debug('Record created' +newRecords);
             }
-            END { print c+0 }
-          ' scanner-report.csv)
 
-          jshtml_fail=$(awk -F',' '
-            NR>1 {
-              sev=$3; file=$5
-              gsub(/"/,"",sev); gsub(/"/,"",file)
-              if (sev ~ /^[0-9]+$/ && sev >= 2 && file ~ /\.(js|html)$/) c++
+        } catch (Exception e) {
+            System.debug('⚠️ Error importing vulnerability data: ' + e.getMessage());
+        }
+    }
+
+    // CSV Parsing Utility - Handles commas inside quoted fields
+    public static List<String> parseCSVLine(String csvLine) {
+        List<String> columns = new List<String>();
+        Boolean insideQuote = false;
+        String currentValue = '';
+
+        for (Integer i = 0; i < csvLine.length(); i++) {
+            String currentChar = csvLine.substring(i, i + 1);
+
+            if (currentChar == '"') {
+                insideQuote = !insideQuote;
+            } else if (currentChar == ',' && !insideQuote) {
+                columns.add(currentValue.trim());
+                currentValue = '';
+            } else {
+                currentValue += currentChar;
             }
-            END { print c+0 }
-          ' scanner-report.csv)
+        }
 
-          echo "================ SUMMARY ================"
-          echo "Severity 1-2 total: $sev1_2_count"
-          echo "Severity 3-5 total: $sev3_5_count"
-          echo "Apex (>=3) issues : $apex_fail"
-          echo "JS/HTML (>=2) issues : $jshtml_fail"
-          echo "========================================="
-
-          if [[ "$apex_fail" -gt 0 || "$jshtml_fail" -gt 0 ]]; then
-            echo "HARD GATE FAILED - BLOCKING PR"
-            echo "---- Violations (first 200 lines) ----"
-            sed -n '1,200p' scanner-report.csv || true
-            exit 1
-          fi
-
-          echo "HARD GATE PASSED - PR CAN MERGE"
+        columns.add(currentValue.trim());
+        return columns;
+    }
+}
