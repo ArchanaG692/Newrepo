@@ -8,25 +8,25 @@ on:
 jobs:
   apex-pmd-scan-pull:
     name: apex-pmd-scan-pull
-    runs-on: 
+    runs-on:
       group: cvs-linux-self-hosted
 
     outputs:
-      scanner-report-path: ${{ steps.upload-report.outputs.artifact-path }}  # Outputs the artifact path to pass to the next job
-      block-pr: ${{ steps.block-check.outputs.block-status }}  # Pass the block status
-      runner-name: ${{ steps.get-runner.outputs.runner_name }}  # Store the runner name
+      scanner-report-path: ${{ steps.upload-report.outputs.artifact-path }}
+      block-pr: ${{ steps.block-check.outputs.block-status }}
+      runner-name: ${{ steps.get-runner.outputs.runner_name }}
       commit-author: ${{ steps.commit-author.outputs.commit-author }}
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Ensures full commit history is available
-          
+          fetch-depth: 0
+
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install ESLint and Compatible Dependencies
         run: npm install eslint --save-dev --legacy-peer-deps
@@ -34,8 +34,8 @@ jobs:
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: temurin
+          java-version: "17"
 
       - name: Install Salesforce CLI
         run: npm install @salesforce/cli --global
@@ -50,10 +50,12 @@ jobs:
           sf plugins uninstall @salesforce/plugin-code-analyzer || true
           sf plugins install @salesforce/plugin-code-analyzer@5.1.0
 
-      - name: Confirm Only v5 Plugin 
+      - name: Confirm Only v5 Plugin
         run: sf plugins | grep code-analyzer
 
-      # Step A: Resolve the diff range and collect changed files by type
+      # ------------------------------------------------------------
+      # A) Resolve diff range & collect changed files
+      # ------------------------------------------------------------
       - name: Resolve diff range & collect changed files
         id: collect-delta-files
         shell: bash
@@ -72,12 +74,10 @@ jobs:
           fi
           echo "RANGE=$RANGE" >> "$GITHUB_OUTPUT"
 
-          # Capture changed files for the extensions we care about
           changed_files=$(git diff --name-only $RANGE -- '*.cls' '*.js' '*.html' || true)
 
           if [[ -z "$changed_files" ]]; then
             echo "⚠️ No changes detected for .cls/.js/.html. Exiting early."
-            # Save an empty marker so downstream steps can skip gracefully
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
           else
             printf "%s\n" $changed_files | sort -u > changed_files.txt
@@ -86,6 +86,9 @@ jobs:
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # ------------------------------------------------------------
+      # B) Build delta-only temp files (Apex wrapped, JS/HTML minimal)
+      # ------------------------------------------------------------
       - name: Get changed lines and create temporary files (delta, with Apex wrapper; no mapping)
         shell: bash
         id: get-changes
@@ -98,7 +101,6 @@ jobs:
 
           echo "Checking for changed .cls, .js, .html files..."
 
-          # Determine a sensible diff range:
           if [[ "${{ github.event_name }}" == "pull_request" && -n "${{ github.base_ref }}" ]]; then
             RANGE="origin/${{ github.base_ref }}...${{ github.sha }}"
             echo "Using PR diff: $RANGE"
@@ -108,13 +110,12 @@ jobs:
             echo "Using fallback diff: $RANGE"
           fi
 
-          # Get only changed files that still exist
           changed_files=$(git diff --name-only "$RANGE" -- '*.cls' '*.js' '*.html' || true)
           echo "Detected changed files: ${changed_files:-<none>}"
 
           if [[ -z "${changed_files}" ]]; then
             echo "No .cls/.js/.html files detected."
-            echo "rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,Commit,ActualLine,TargetBranch" > scanner-report.csv
+            echo "Problem,Severity,File,Line,Rule,Category" > scanner-report.csv
             exit 0
           fi
 
@@ -125,7 +126,7 @@ jobs:
 
             echo "Processing file: $file"
 
-            # Extract added lines with their new-file line numbers (no mapping stored)
+            # Extract added lines with their new-file line numbers
             git diff -U0 "$RANGE" -- "$file" | awk '
               /^@@/{
                 if (match($0, /\+([0-9]+)(,([0-9]+))?/, m)) newLine=m[1]+0;
@@ -134,7 +135,6 @@ jobs:
               /^diff / || /^index / || /^--- / || /^\+\+\+ / { next }
               /^\+/ { print newLine "\t" substr($0,2); newLine++; next }
               /^-/ { next }
-              { newLine++ }
             ' > lines.tmp || true
 
             if [[ ! -s lines.tmp ]]; then
@@ -142,8 +142,8 @@ jobs:
               continue
             fi
 
-            # Create temp file name with proper extension
             sanitized="${file//\//_}"
+
             case "$file" in
               *.cls)
                 temp_file="temp_scanner_files/temp_${sanitized%.cls}.cls"
@@ -151,13 +151,14 @@ jobs:
                   echo "public with sharing class TempWrapper_${sanitized//[^A-Za-z0-9_]/_} {"
                   echo "  public static void tempMethod() {"
                 } > "$temp_file"
+
                 while IFS= read -r line; do
                   content="${line#*"$TAB"}"
-                  # Skip pure-whitespace
                   if [[ -n "$(echo "$content" | sed 's/[[:space:]]//g')" ]]; then
                     printf "    %s\n" "$content" >> "$temp_file"
                   fi
                 done < lines.tmp
+
                 {
                   echo "  }"
                   echo "}"
@@ -207,69 +208,157 @@ jobs:
             exit 0
           fi
 
-      - name: Run SFDX Scanner
+      # ------------------------------------------------------------
+      # ✅ FIX: Build files_to_scan.txt (this is what your run failed on)
+      # ------------------------------------------------------------
+      - name: Build files_to_scan.txt from temp files
+        shell: bash
         run: |
+          set -euo pipefail
+
+          if [[ ! -f changed_cls_lwc_files.txt ]]; then
+            echo "❌ changed_cls_lwc_files.txt not found"
+            exit 1
+          fi
+
+          # Only include existing files
+          while read -r f; do
+            [[ -n "$f" && -f "$f" ]] && echo "$f"
+          done < changed_cls_lwc_files.txt > files_to_scan.txt
+
+          echo "====== files_to_scan.txt ======"
+          if [[ -s files_to_scan.txt ]]; then
+            cat files_to_scan.txt
+          else
+            echo "No files to scan."
+          fi
+
+      # ------------------------------------------------------------
+      # C) Run Code Analyzer v5 on the temp delta files + build a single CSV
+      # ------------------------------------------------------------
+      - name: Run SFDX Scanner (Code Analyzer v5)
+        shell: bash
+        run: |
+          set -euo pipefail
+
           echo "Problem,Severity,File,Line,Rule,Category" > scanner-report.csv
 
-          while read -r file; do
-            [ -z "$file" ] && continue
+          if [[ ! -s files_to_scan.txt ]]; then
+            echo "✅ Nothing to scan. Empty report created."
+            exit 0
+          fi
 
+          while read -r file; do
+            [[ -z "$file" ]] && continue
             echo "🔍 Scanning $file"
+            rm -f tmp.csv
 
             if [[ "$file" == *.cls ]]; then
-              sf code-analyzer run --workspace "$file" --rule-selector ApexCRUDViolation --rule-selector ApexBadCrypto --rule-selector ApexDangerousMethods --rule-selector ApexInsecureEndpoint --rule-selector ApexOpenRedirect --rule-selector ApexSharingViolations --rule-selector ApexSOQLInjection --rule-selector ApexSuggestUsingNamedCred --rule-selector ApexXSSFromEscapeFalse --rule-selector ApexXSSFromURLParam --rule-selector AvoidDebugStatements --rule-selector AvoidNonRestrictiveQueries --rule-selector EagerlyLoadedDescribeSObjectResult --rule-selector OperationWithHighCostInLoop --rule-selector OperationWithLimitsInLoop --rule-selector ApexCSRF --rule-selector AvoidDirectAccessTriggerMap --rule-selector AvoidHardcodingId --rule-selector EmptyCatchBlock --rule-selector UnusedLocalVariable --rule-selector QueueableWithoutFinalizer --rule-selector IfElseStmtsMustUseBraces --rule-selector ForLoopsMustUseBraces --rule-selector AvoidDeeplyNestedIfStmts --rule-selector DebugsShouldUseLoggingLevel --rule-selector ApexUnitTestShouldNotUseSeeAllDataTrue --rule-selector EmptyStatementBlock  --rule-selector EmptyTryOrFinallyBlock --rule-selector CognitiveComplexity --rule-selector TooManyFields --rule-selector ExcessiveParameterList --rule-selector ExcessiveClassLength --rule-selector NcssConstructorCount --rule-selector NcssMethodCount --rule-selector NcssTypeCount --rule-selector ExcessivePublicCount --rule-selector CyclomaticComplexity --rule-selector StdCyclomaticComplexity --rule-selector ApexUnitTestClassShouldHaveAsserts --output-file tmp.csv --config-file code-analyzer.yml || echo "Scanner run failed for $file"
-              # sf scanner:run \
-              #   --target "$file" \
-              #   --format csv \
-              #   --outfile tmp.csv \
-              #   --pmdconfig force-app/main/default/Custom_apex_ruleset.xml || true
+              sf code-analyzer run \
+                --workspace "$file" \
+                --rule-selector ApexCRUDViolation \
+                --rule-selector ApexBadCrypto \
+                --rule-selector ApexDangerousMethods \
+                --rule-selector ApexInsecureEndpoint \
+                --rule-selector ApexOpenRedirect \
+                --rule-selector ApexSharingViolations \
+                --rule-selector ApexSOQLInjection \
+                --rule-selector ApexSuggestUsingNamedCred \
+                --rule-selector ApexXSSFromEscapeFalse \
+                --rule-selector ApexXSSFromURLParam \
+                --rule-selector AvoidDebugStatements \
+                --rule-selector AvoidNonRestrictiveQueries \
+                --rule-selector EagerlyLoadedDescribeSObjectResult \
+                --rule-selector OperationWithHighCostInLoop \
+                --rule-selector OperationWithLimitsInLoop \
+                --rule-selector ApexCSRF \
+                --rule-selector AvoidDirectAccessTriggerMap \
+                --rule-selector AvoidHardcodingId \
+                --rule-selector EmptyCatchBlock \
+                --rule-selector UnusedLocalVariable \
+                --rule-selector QueueableWithoutFinalizer \
+                --rule-selector IfElseStmtsMustUseBraces \
+                --rule-selector ForLoopsMustUseBraces \
+                --rule-selector AvoidDeeplyNestedIfStmts \
+                --rule-selector DebugsShouldUseLoggingLevel \
+                --rule-selector ApexUnitTestShouldNotUseSeeAllDataTrue \
+                --rule-selector EmptyStatementBlock \
+                --rule-selector EmptyTryOrFinallyBlock \
+                --rule-selector CognitiveComplexity \
+                --rule-selector TooManyFields \
+                --rule-selector ExcessiveParameterList \
+                --rule-selector ExcessiveClassLength \
+                --rule-selector NcssConstructorCount \
+                --rule-selector NcssMethodCount \
+                --rule-selector NcssTypeCount \
+                --rule-selector ExcessivePublicCount \
+                --rule-selector CyclomaticComplexity \
+                --rule-selector StdCyclomaticComplexity \
+                --rule-selector ApexUnitTestClassShouldHaveAsserts \
+                --output-file tmp.csv \
+                --config-file code-analyzer.yml \
+              || echo "⚠️ Code Analyzer failed for $file (continuing to build report)"
             else
-              sf scanner:run \
-                --target "$file" \
-                --format csv \
-                --outfile tmp.csv || true
+              # If you really want JS/HTML delta checks via ESLint engine:
+              sf code-analyzer run \
+                --workspace "$file" \
+                --engine eslint \
+                --output-file tmp.csv \
+              || echo "⚠️ ESLint analyzer failed for $file (continuing to build report)"
             fi
 
-            if [ -f tmp.csv ]; then
-              tail -n +2 tmp.csv >> scanner-report.csv
+            if [[ -f tmp.csv ]]; then
+              tail -n +2 tmp.csv >> scanner-report.csv || true
             fi
           done < files_to_scan.txt
 
           echo "✅ Final Scanner Report:"
           cat scanner-report.csv
 
+      # ------------------------------------------------------------
+      # D) HARD FAIL gate (tweak thresholds here)
+      # ------------------------------------------------------------
       - name: HARD FAIL – Block PR on Violations
+        shell: bash
         run: |
-          if [ ! -f scanner-report.csv ]; then
+          set -euo pipefail
+
+          if [[ ! -f scanner-report.csv ]]; then
             echo "❌ scanner-report.csv not found"
             exit 1
           fi
 
           echo "🔍 Evaluating scanner-report.csv"
 
+          # Apex: block Severity >= 3
           apex=$(awk -F',' '
             NR>1 {
               sev=$2; file=$3
               gsub(/"/,"",sev); gsub(/"/,"",file)
-              if (sev == 1 || sev ==2 && file ~ /\.cls$/) c++
+              sev_num = sev + 0
+              if (sev_num >= 3 && file ~ /\.cls$/) c++
             }
             END { print c+0 }
           ' scanner-report.csv)
 
+          # JS/HTML: block Severity >= 2 (optional)
           lwc=$(awk -F',' '
             NR>1 {
               sev=$2; file=$3
               gsub(/"/,"",sev); gsub(/"/,"",file)
-              if (sev >= 2 && file ~ /\.(js|html|lwc)$/) c++
+              sev_num = sev + 0
+              if (sev_num >= 2 && file ~ /\.(js|html)$/) c++
             }
             END { print c+0 }
           ' scanner-report.csv)
 
-          echo "Apex Severity 3 Issues : $apex"
-          echo "LWC Severity 2+ Issues : $lwc"
+          echo "Apex Severity >= 3 Issues : $apex"
+          echo "JS/HTML Severity >= 2 Issues : $lwc"
 
-          if [ "$apex" -gt 0 ] || [ "$lwc" -gt 0 ]; then
+          if [[ "$apex" -gt 0 || "$lwc" -gt 0 ]]; then
             echo "🚫 HARD GATE FAILED – BLOCKING PR"
+            echo "---- Violations (first 200 lines) ----"
+            sed -n '1,200p' scanner-report.csv || true
             exit 1
           fi
 
