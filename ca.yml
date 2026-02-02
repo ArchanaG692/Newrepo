@@ -49,18 +49,32 @@ jobs:
 
       - name: Get Commit Author
         id: commit-author
+        shell: bash
         run: |
-          AUTHOR_NAME=$(git log -1 --pretty=format:'%an')
-          AUTHOR_EMAIL=$(git log -1 --pretty=format:'%ae')
-          COMMITTER_NAME=$(git log -1 --pretty=format:'%cn')
-          COMMITTER_EMAIL=$(git log -1 --pretty=format:'%ce')
+          set -euo pipefail
 
-          echo "Author: $AUTHOR_NAME <$AUTHOR_EMAIL>"
+          AUTHOR_RAW="$(git log -1 --pretty=format:'%an')"
+          AUTHOR_EMAIL="$(git log -1 --pretty=format:'%ae')"
+          COMMITTER_NAME="$(git log -1 --pretty=format:'%cn')"
+          COMMITTER_EMAIL="$(git log -1 --pretty=format:'%ce')"
+
+          echo "Author (raw): $AUTHOR_RAW <$AUTHOR_EMAIL>"
           echo "Committer: $COMMITTER_NAME <$COMMITTER_EMAIL>"
 
-          echo "commit-author=$AUTHOR_NAME" >> $GITHUB_OUTPUT
-          echo "GITHUB_USERNAME=$AUTHOR_NAME" >> $GITHUB_ENV
-          echo "COMMIT_AUTHOR=$AUTHOR_NAME" >> $GITHUB_ENV
+          # ✅ Fix "Lastname, Firstname" -> "Firstname Lastname"
+          if [[ "$AUTHOR_RAW" == *","* ]]; then
+            last="$(echo "$AUTHOR_RAW" | cut -d',' -f1 | xargs)"
+            first="$(echo "$AUTHOR_RAW" | cut -d',' -f2- | xargs)"
+            AUTHOR_FMT="${first} ${last}"
+          else
+            AUTHOR_FMT="$AUTHOR_RAW"
+          fi
+
+          echo "Author (formatted): $AUTHOR_FMT"
+
+          echo "commit-author=$AUTHOR_FMT" >> "$GITHUB_OUTPUT"
+          echo "GITHUB_USERNAME=$AUTHOR_FMT" >> "$GITHUB_ENV"
+          echo "COMMIT_AUTHOR=$AUTHOR_FMT" >> "$GITHUB_ENV"
 
       - name: Get Repository and Branch Info
         shell: bash
@@ -84,10 +98,13 @@ jobs:
           echo "TARGET_BRANCH=${TARGET_BRANCH}" >> "$GITHUB_ENV"
           echo "SOURCE_BRANCH=${SOURCE_BRANCH}" >> "$GITHUB_ENV"
           echo "COMMIT_LABEL=${COMMIT_LABEL}" >> "$GITHUB_ENV"
+
           FILE_TITLE="Code Scanner Report_${REPO_NAME}_${TARGET_BRANCH}_${COMMIT_LABEL}"
+          echo "FILE_TITLE=${FILE_TITLE}" >> "$GITHUB_ENV"
+
           echo "Target Branch = ${TARGET_BRANCH}"
           echo "Source Branch = ${SOURCE_BRANCH}"
-          echo "FILE_TITLE=${FILE_TITLE}" >> $GITHUB_ENV
+          echo "FILE_TITLE = ${FILE_TITLE}"
 
       # ------------------------------------------------------------
       # 1) Resolve the diff range and collect changed files by type
@@ -264,28 +281,23 @@ jobs:
           echo "====== line_number_mapping.txt (first 50) ======"
           head -n 50 line_number_mapping.txt || true
 
-      # ✅ NEW: Print temp wrapper class (content) so you can confirm what got scanned
-      - name: DEBUG – Print temp wrapper classes
+      # ------------------------------------------------------------
+      # 2.1) ✅ Print the temp wrapper classes (what scanner runs on)
+      # ------------------------------------------------------------
+      - name: Print temp wrapper class files (debug)
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "==== temp_scanner_files listing ===="
-          ls -lah temp_scanner_files || true
-
-          echo "==== Print all temp .cls wrappers (with line numbers) ===="
-          shopt -s nullglob
-          for f in temp_scanner_files/*.cls; do
-            echo ""
-            echo "--------------------------------------------------"
-            echo "TEMP WRAPPER: $f"
-            echo "--------------------------------------------------"
-            nl -ba "$f" | sed -n '1,220p'
-          done
-
-          echo ""
-          echo "==== Grep for System.debug in temp wrappers ===="
-          grep -RIn --line-number "System\.debug" temp_scanner_files || echo "❌ No System.debug found in temp wrappers"
+          echo "====== TEMP WRAPPER FILES (first 200 lines each) ======"
+          if [[ -d temp_scanner_files ]] && compgen -G "temp_scanner_files/*.cls" > /dev/null; then
+            for f in temp_scanner_files/*.cls; do
+              echo "----- $f -----"
+              sed -n '1,200p' "$f" || true
+              echo
+            done
+          else
+            echo "No temp .cls wrapper files found."
+          fi
 
       # ------------------------------------------------------------
       # 3) Build lookup map (basename|tempLine=actualLine)
@@ -354,11 +366,11 @@ jobs:
             done < actual_line_lookup.env
           fi
 
-          # Final header (NO NYA)
+          # Final header
           echo "rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,CommitAuthor,ActualLine,TargetBranch" > scanner-report.csv
 
           if [[ ! -s files_to_scan.txt ]]; then
-            echo "✅ Nothing to scan. Empty report created."
+            echo "Nothing to scan. Empty report created."
             exit 0
           fi
 
@@ -411,13 +423,13 @@ jobs:
                 --rule-selector ApexUnitTestClassShouldHaveAsserts \
                 --output-file tmp.csv \
                 --config-file code-analyzer.yml \
-              || echo "⚠️ Code Analyzer failed for $file (continuing to build report)"
+              || echo "Code Analyzer failed for $file (continuing to build report)"
             else
               sf code-analyzer run \
                 --workspace "$file" \
                 --engine eslint \
                 --output-file tmp.csv \
-              || echo "⚠️ ESLint analyzer failed for $file (continuing to build report)"
+              || echo "ESLint analyzer failed for $file (continuing to build report)"
             fi
 
             if [[ -f tmp.csv ]]; then
@@ -428,6 +440,7 @@ jobs:
               tail -n +2 tmp.csv | while IFS= read -r row; do
                 [[ -z "$row" ]] && continue
 
+                # Code Analyzer CSV columns: startLine is column 6
                 startLine=$(echo "$row" | awk -F',' '{print $6}' | tr -d '"')
                 actualLine="$startLine"
 
@@ -438,12 +451,13 @@ jobs:
                   actualLine="$mapped"
                 fi
 
-                echo "${row},${COMMIT_AUTHOR},${actualLine},${TARGET_BRANCH}" >> scanner-report.csv
+                # ✅ Commit author is safe (no commas now), still quote it for CSV safety
+                echo "${row},\"${COMMIT_AUTHOR}\",${actualLine},${TARGET_BRANCH}" >> scanner-report.csv
               done
             fi
           done < files_to_scan.txt
 
-          echo "✅ Final Scanner Report (first 50 lines):"
+          echo "Final Scanner Report (first 50 lines):"
           head -n 50 scanner-report.csv
 
       - name: Authenticate with Salesforce
@@ -456,10 +470,11 @@ jobs:
             -d "username=${{ secrets.SF_USERNAME }}" \
             -d "password=${{ secrets.SF_PASSWORD }}" )
           SF_ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token')
-          if [ -z "$SF_ACCESS_TOKEN" ]; then
+          if [ -z "$SF_ACCESS_TOKEN" ] || [ "$SF_ACCESS_TOKEN" == "null" ]; then
             echo "Salesforce authentication failed."
             exit 1
           fi
+          echo "::add-mask::$SF_ACCESS_TOKEN"
           echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
           echo "Successfully authenticated with Salesforce."
 
@@ -473,7 +488,6 @@ jobs:
           fi
 
           echo "Uploading scanner report to Salesforce..."
-
           response=$(curl -X POST "https://service360--arpoc2.sandbox.my.salesforce.com/services/data/v61.0/sobjects/ContentVersion" \
             -H "Authorization: Bearer $SF_ACCESS_TOKEN" \
             -H "Content-Type: multipart/form-data" \
@@ -520,16 +534,16 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           BRANCH_NAME="Scanner_Reports"
-          echo "✅ Target Branch: $BRANCH_NAME"
+          echo "Target Branch: $BRANCH_NAME"
 
           git stash push --include-untracked -m "stash scanner report" || true
 
           if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
-            echo "✅ Remote branch $BRANCH_NAME exists."
+            echo "Remote branch $BRANCH_NAME exists."
             git fetch origin "$BRANCH_NAME":"$BRANCH_NAME"
             git checkout "$BRANCH_NAME"
           else
-            echo "❌ Remote branch $BRANCH_NAME does not exist. Creating it..."
+            echo "Remote branch $BRANCH_NAME does not exist. Creating it..."
             git checkout -b "$BRANCH_NAME"
             git push --set-upstream origin "$BRANCH_NAME"
           fi
@@ -547,90 +561,67 @@ jobs:
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
 
-      # ✅ UPDATED: Blocking step with Severity buckets (1-2 vs 3-5) and printed summary
-      - name: HARD FAIL Block PR on Violations + Severity buckets
+      # ------------------------------------------------------------
+      # 6) HARD FAIL + print severity buckets
+      # ------------------------------------------------------------
+      - name: HARD FAIL Block PR on Violations
         shell: bash
         run: |
           set -euo pipefail
 
           if [[ ! -f scanner-report.csv ]]; then
-            echo "❌ scanner-report.csv not found"
+            echo "scanner-report.csv not found"
             exit 1
           fi
 
           echo "🔍 Evaluating scanner-report.csv"
 
-          # Count all violations by severity buckets (across all files)
-          sev_1_2=$(awk -F',' '
+          sev1_2_count=$(awk -F',' '
             NR>1 {
-              sev=$3
-              gsub(/"/,"",sev)
-              if (sev ~ /^[0-9]+$/) {
-                s = sev + 0
-                if (s == 1 || s == 2) c++
-              }
+              sev=$3; gsub(/"/,"",sev);
+              if (sev ~ /^[0-9]+$/ && sev >= 1 && sev <= 2) c++
             }
             END { print c+0 }
           ' scanner-report.csv)
 
-          sev_3_5=$(awk -F',' '
+          sev3_5_count=$(awk -F',' '
             NR>1 {
-              sev=$3
-              gsub(/"/,"",sev)
-              if (sev ~ /^[0-9]+$/) {
-                s = sev + 0
-                if (s >= 3 && s <= 5) c++
-              }
+              sev=$3; gsub(/"/,"",sev);
+              if (sev ~ /^[0-9]+$/ && sev >= 3 && sev <= 5) c++
             }
             END { print c+0 }
           ' scanner-report.csv)
 
-          # Keep your Apex vs JS/HTML breakdown too
-          apex_ge_3=$(awk -F',' '
+          apex_fail=$(awk -F',' '
             NR>1 {
               sev=$3; file=$5
               gsub(/"/,"",sev); gsub(/"/,"",file)
-              if (sev ~ /^[0-9]+$/) {
-                s = sev + 0
-                if (s >= 3 && file ~ /\.cls$/) c++
-              }
+              if (sev ~ /^[0-9]+$/ && sev >= 3 && file ~ /\.cls$/) c++
             }
             END { print c+0 }
           ' scanner-report.csv)
 
-          lwc_ge_2=$(awk -F',' '
+          jshtml_fail=$(awk -F',' '
             NR>1 {
               sev=$3; file=$5
               gsub(/"/,"",sev); gsub(/"/,"",file)
-              if (sev ~ /^[0-9]+$/) {
-                s = sev + 0
-                if (s >= 2 && file ~ /\.(js|html)$/) c++
-              }
+              if (sev ~ /^[0-9]+$/ && sev >= 2 && file ~ /\.(js|html)$/) c++
             }
             END { print c+0 }
           ' scanner-report.csv)
 
           echo "================ SUMMARY ================"
-          echo "Severity 1-2 violations : $sev_1_2"
-          echo "Severity 3-5 violations : $sev_3_5"
-          echo "Apex  (severity >=3)    : $apex_ge_3"
-          echo "JS/HTML (severity >=2)  : $lwc_ge_2"
+          echo "Severity 1-2 total: $sev1_2_count"
+          echo "Severity 3-5 total: $sev3_5_count"
+          echo "Apex (>=3) issues : $apex_fail"
+          echo "JS/HTML (>=2) issues : $jshtml_fail"
           echo "========================================="
 
-          # ✅ Block policy:
-          # Fail if ANY severity 1-2 exists (most severe in Code Analyzer)
-          if [[ "$sev_1_2" -gt 0 ]]; then
-            echo "🚫 HARD GATE FAILED – Found severity 1-2 violations"
+          if [[ "$apex_fail" -gt 0 || "$jshtml_fail" -gt 0 ]]; then
+            echo "HARD GATE FAILED - BLOCKING PR"
             echo "---- Violations (first 200 lines) ----"
             sed -n '1,200p' scanner-report.csv || true
             exit 1
           fi
 
-          # If you also want to block on Apex>=3 or JS/HTML>=2, uncomment:
-          # if [[ "$apex_ge_3" -gt 0 || "$lwc_ge_2" -gt 0 ]]; then
-          #   echo "🚫 HARD GATE FAILED – BLOCKING PR"
-          #   sed -n '1,200p' scanner-report.csv || true
-          #   exit 1
-          # fi
-
-          echo "✅ HARD GATE PASSED – PR CAN MERGE"
+          echo "HARD GATE PASSED - PR CAN MERGE"
