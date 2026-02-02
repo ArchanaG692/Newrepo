@@ -422,6 +422,101 @@ jobs:
           echo "✅ Final Scanner Report:"
           head -n 50 scanner-report.csv
 
+      - name: Authenticate with Salesforce
+        id: sf-auth
+        run: |
+          response=$(curl -X POST "https://login.salesforce.com/services/oauth2/token" \
+            -d "grant_type=password" \
+            -d "client_id=${{ secrets.SF_CLIENT_ID }}" \
+            -d "client_secret=${{ secrets.SF_CLIENT_SECRET }}" \
+            -d "username=${{ secrets.SF_USERNAME }}" \
+            -d "password=${{ secrets.SF_PASSWORD }}" )
+          SF_ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token')
+          if [ -z "$SF_ACCESS_TOKEN" ]; then
+            echo "Salesforce authentication failed."
+            exit 1
+          fi
+          echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
+          echo "Successfully authenticated with Salesforce."
+          
+      - name: Upload Scanner Report to Salesforce
+        if: success()
+        run: |
+            # Check if the scanner report contains violations (more than just the header)
+            violation_count=$(tail -n +2 scanner-report.csv | wc -l)
+            if [ "$violation_count" -eq 0 ]; then
+              echo "No violations found. Skipping Salesforce upload."
+              exit 0
+            fi
+
+            echo "Uploading scanner report to Salesforce..."
+
+            # Send file to Salesforce
+            response=$(curl -X POST "https://service360--arpoc2.sandbox.my.salesforce.com/services/data/v61.0/sobjects/ContentVersion" \
+              -H "Authorization: Bearer $SF_ACCESS_TOKEN" \
+              -H "Content-Type: multipart/form-data" \
+              -F "entity_content={\"Title\": \"${{ env.FILE_TITLE }}\", \"PathOnClient\": \"scanner-report.csv\"};type=application/json" \
+              -F "VersionData=@scanner-report.csv;type=text/csv")
+
+             # 🔍 Debug: Print the full API response
+            echo "📢 Salesforce API Response: $response"
+            # Extract the ID safely (handles both array & object responses)
+            contentVersionId=$(echo "$response" | jq -r 'if type=="array" then .[0].id else .id end' 2>/dev/null || echo "null")
+
+            #contentVersionId=$(echo "$response" | jq -r '.id // empty')
+        
+            if [[ "$contentVersionId" == "null" || -z "$contentVersionId" ]]; then
+              echo "Error: Failed to extract ContentVersion ID from response."
+              echo "Full API Response: $response"  # Log full response for debugging
+              exit 1
+            fi
+        
+            echo "Successfully uploaded scanner report to Salesforce." 
+  
+      - name: Ensure Scanner Report Exists
+        if: always()  # ✅ Ensures it runs even if commit is blocked
+        run: |
+            if [ ! -s scanner-report.csv ]; then
+              echo "No scanner report generated, creating a dummy report."
+              echo "rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,Commit,ActualLine,TargetBranch" > scanner-report.csv
+            fi
+      - name: Debug - List Files Before Upload
+        if: always()
+        run: |
+            echo "Listing files before uploading scanner report:"
+            ls -lah
+
+      - name: Commit and Push Scanner Report to `Scanner_Reports` Branch
+        if: always()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          BRANCH_NAME="Scanner_Reports"
+          echo "✅ Target Branch: $BRANCH_NAME"
+
+          # 🔹 Check if the `Scanner_Reports` branch exists remotely
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
+            echo "✅ Remote branch $BRANCH_NAME exists."
+            git checkout $BRANCH_NAME
+          else
+            echo "❌ Remote branch $BRANCH_NAME does not exist! Creating it now..."
+            git checkout -b $BRANCH_NAME
+            git push --set-upstream origin $BRANCH_NAME
+          fi
+
+          git stash --include-untracked
+          git pull origin $BRANCH_NAME --rebase
+          mkdir -p Artifact
+          cp -r /tmp/artifact_backup/${{ env.REPORT_FILE }} Artifact/${{ env.REPORT_FILE }}
+          echo "✅ Scanner report restored to Artifact/${{ env.REPORT_FILE }}."
+
+          git add Artifact/${{ env.REPORT_FILE }}
+          git commit -m "🔄 Auto-update scanner report (${REPORT_FILE}) in Artifact folder for branch $BRANCH_NAME" || echo "No changes to commit"
+          git push origin $BRANCH_NAME
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          
       # ------------------------------------------------------------
       # 6) HARD FAIL gate
       #    severity=$3, file=$5 (Code Analyzer CSV)
