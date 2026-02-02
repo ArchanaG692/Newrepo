@@ -1,0 +1,276 @@
+name: Apex PMD Scan (PRs, CSV, fail-on-violation)
+
+on:
+  pull_request:
+    branches:
+      - "**"
+
+jobs:
+  apex-pmd-scan-pull:
+    name: apex-pmd-scan-pull
+    runs-on: 
+      group: cvs-linux-self-hosted
+
+    outputs:
+      scanner-report-path: ${{ steps.upload-report.outputs.artifact-path }}  # Outputs the artifact path to pass to the next job
+      block-pr: ${{ steps.block-check.outputs.block-status }}  # Pass the block status
+      runner-name: ${{ steps.get-runner.outputs.runner_name }}  # Store the runner name
+      commit-author: ${{ steps.commit-author.outputs.commit-author }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensures full commit history is available
+          
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install ESLint and Compatible Dependencies
+        run: npm install eslint --save-dev --legacy-peer-deps
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Salesforce CLI
+        run: npm install @salesforce/cli --global
+
+      - name: Disable Auto Plugin Install
+        run: |
+          mkdir -p ~/.sf
+          echo '{"plugins":{"autoInstall":false}}' > ~/.sf/sf-config.json
+
+      - name: Install Code Analyzer Plugin v5
+        run: |
+          sf plugins uninstall @salesforce/plugin-code-analyzer || true
+          sf plugins install @salesforce/plugin-code-analyzer@5.1.0
+
+      - name: Confirm Only v5 Plugin 
+        run: sf plugins | grep code-analyzer
+
+      # Step A: Resolve the diff range and collect changed files by type
+      - name: Resolve diff range & collect changed files
+        id: collect-delta-files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Resolving diff range..."
+          git fetch --no-tags --prune --depth=50 origin +refs/heads/*:refs/remotes/origin/*
+
+          if [[ "${{ github.event_name }}" == "pull_request" && -n "${{ github.base_ref }}" ]]; then
+            RANGE="origin/${{ github.base_ref }}...${{ github.sha }}"
+            echo "Using PR diff range: $RANGE"
+          else
+            RANGE="HEAD~1..HEAD"
+            echo "Using fallback diff range: $RANGE"
+          fi
+          echo "RANGE=$RANGE" >> "$GITHUB_OUTPUT"
+
+          # Capture changed files for the extensions we care about
+          changed_files=$(git diff --name-only $RANGE -- '*.cls' '*.js' '*.html' || true)
+
+          if [[ -z "$changed_files" ]]; then
+            echo "⚠️ No changes detected for .cls/.js/.html. Exiting early."
+            # Save an empty marker so downstream steps can skip gracefully
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            printf "%s\n" $changed_files | sort -u > changed_files.txt
+            echo "Detected changed files:"
+            cat changed_files.txt
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get changed lines and create temporary files (delta, with Apex wrapper; no mapping)
+        shell: bash
+        id: get-changes
+        run: |
+          set -euo pipefail
+
+          mkdir -p temp_scanner_files
+          : > changed_cls_lwc_files.txt
+          : > scanner-report-temp.csv
+
+          echo "Checking for changed .cls, .js, .html files..."
+
+          # Determine a sensible diff range:
+          if [[ "${{ github.event_name }}" == "pull_request" && -n "${{ github.base_ref }}" ]]; then
+            RANGE="origin/${{ github.base_ref }}...${{ github.sha }}"
+            echo "Using PR diff: $RANGE"
+            git fetch --no-tags --prune origin +refs/heads/*:refs/remotes/origin/*
+          else
+            RANGE="HEAD~1..HEAD"
+            echo "Using fallback diff: $RANGE"
+          fi
+
+          # Get only changed files that still exist
+          changed_files=$(git diff --name-only "$RANGE" -- '*.cls' '*.js' '*.html' || true)
+          echo "Detected changed files: ${changed_files:-<none>}"
+
+          if [[ -z "${changed_files}" ]]; then
+            echo "No .cls/.js/.html files detected."
+            echo "rule,engine,severity,tags,file,startLine,startColumn,endLine,endColumn,message,resources,Commit,ActualLine,TargetBranch" > scanner-report.csv
+            exit 0
+          fi
+
+          TAB=$(printf '\t')
+
+          for file in $changed_files; do
+            [[ -f "$file" ]] || { echo "Skipping deleted file: $file"; continue; }
+
+            echo "Processing file: $file"
+
+            # Extract added lines with their new-file line numbers (no mapping stored)
+            git diff -U0 "$RANGE" -- "$file" | awk '
+              /^@@/{
+                if (match($0, /\+([0-9]+)(,([0-9]+))?/, m)) newLine=m[1]+0;
+                next
+              }
+              /^diff / || /^index / || /^--- / || /^\+\+\+ / { next }
+              /^\+/ { print newLine "\t" substr($0,2); newLine++; next }
+              /^-/ { next }
+              { newLine++ }
+            ' > lines.tmp || true
+
+            if [[ ! -s lines.tmp ]]; then
+              echo "No valid added lines found for $file. Skipping..."
+              continue
+            fi
+
+            # Create temp file name with proper extension
+            sanitized="${file//\//_}"
+            case "$file" in
+              *.cls)
+                temp_file="temp_scanner_files/temp_${sanitized%.cls}.cls"
+                {
+                  echo "public with sharing class TempWrapper_${sanitized//[^A-Za-z0-9_]/_} {"
+                  echo "  public static void tempMethod() {"
+                } > "$temp_file"
+                while IFS= read -r line; do
+                  content="${line#*"$TAB"}"
+                  # Skip pure-whitespace
+                  if [[ -n "$(echo "$content" | sed 's/[[:space:]]//g')" ]]; then
+                    printf "    %s\n" "$content" >> "$temp_file"
+                  fi
+                done < lines.tmp
+                {
+                  echo "  }"
+                  echo "}"
+                } >> "$temp_file"
+                ;;
+              *.js)
+                temp_file="temp_scanner_files/temp_${sanitized%.js}.js"
+                echo "/* delta-only temp JS */" > "$temp_file"
+                while IFS= read -r line; do
+                  content="${line#*"$TAB"}"
+                  if [[ -n "$(echo "$content" | sed 's/[[:space:]]//g')" ]]; then
+                    printf "%s\n" "$content" >> "$temp_file"
+                  fi
+                done < lines.tmp
+                ;;
+              *.html)
+                temp_file="temp_scanner_files/temp_${sanitized%.html}.html"
+                echo "<template>" > "$temp_file"
+                while IFS= read -r line; do
+                  content="${line#*"$TAB"}"
+                  if [[ -n "$(echo "$content" | sed 's/[[:space:]]//g')" ]]; then
+                    printf "%s\n" "$content" >> "$temp_file"
+                  fi
+                done < lines.tmp
+                echo "</template>" >> "$temp_file"
+                ;;
+              *)
+                echo "Unhandled type for $file; skipping."
+                continue
+                ;;
+            esac
+
+            if [[ -s "$temp_file" ]]; then
+              echo "$temp_file" >> changed_cls_lwc_files.txt
+              echo "Created temp file: $temp_file"
+            else
+              rm -f "$temp_file"
+              echo "Empty temp file removed for $file"
+            fi
+          done
+
+          echo "====== Generated temp files ======"
+          if [[ -s changed_cls_lwc_files.txt ]]; then
+            cat changed_cls_lwc_files.txt
+          else
+            echo "No temp files created. Exiting."
+            exit 0
+          fi
+
+      - name: Run SFDX Scanner
+        run: |
+          echo "Problem,Severity,File,Line,Rule,Category" > scanner-report.csv
+
+          while read -r file; do
+            [ -z "$file" ] && continue
+
+            echo "🔍 Scanning $file"
+
+            if [[ "$file" == *.cls ]]; then
+              sf code-analyzer run --workspace "$file" --rule-selector ApexCRUDViolation --rule-selector ApexBadCrypto --rule-selector ApexDangerousMethods --rule-selector ApexInsecureEndpoint --rule-selector ApexOpenRedirect --rule-selector ApexSharingViolations --rule-selector ApexSOQLInjection --rule-selector ApexSuggestUsingNamedCred --rule-selector ApexXSSFromEscapeFalse --rule-selector ApexXSSFromURLParam --rule-selector AvoidDebugStatements --rule-selector AvoidNonRestrictiveQueries --rule-selector EagerlyLoadedDescribeSObjectResult --rule-selector OperationWithHighCostInLoop --rule-selector OperationWithLimitsInLoop --rule-selector ApexCSRF --rule-selector AvoidDirectAccessTriggerMap --rule-selector AvoidHardcodingId --rule-selector EmptyCatchBlock --rule-selector UnusedLocalVariable --rule-selector QueueableWithoutFinalizer --rule-selector IfElseStmtsMustUseBraces --rule-selector ForLoopsMustUseBraces --rule-selector AvoidDeeplyNestedIfStmts --rule-selector DebugsShouldUseLoggingLevel --rule-selector ApexUnitTestShouldNotUseSeeAllDataTrue --rule-selector EmptyStatementBlock  --rule-selector EmptyTryOrFinallyBlock --rule-selector CognitiveComplexity --rule-selector TooManyFields --rule-selector ExcessiveParameterList --rule-selector ExcessiveClassLength --rule-selector NcssConstructorCount --rule-selector NcssMethodCount --rule-selector NcssTypeCount --rule-selector ExcessivePublicCount --rule-selector CyclomaticComplexity --rule-selector StdCyclomaticComplexity --rule-selector ApexUnitTestClassShouldHaveAsserts --output-file tmp.csv --config-file code-analyzer.yml || echo "Scanner run failed for $file"
+              # sf scanner:run \
+              #   --target "$file" \
+              #   --format csv \
+              #   --outfile tmp.csv \
+              #   --pmdconfig force-app/main/default/Custom_apex_ruleset.xml || true
+            else
+              sf scanner:run \
+                --target "$file" \
+                --format csv \
+                --outfile tmp.csv || true
+            fi
+
+            if [ -f tmp.csv ]; then
+              tail -n +2 tmp.csv >> scanner-report.csv
+            fi
+          done < files_to_scan.txt
+
+          echo "✅ Final Scanner Report:"
+          cat scanner-report.csv
+
+      - name: HARD FAIL – Block PR on Violations
+        run: |
+          if [ ! -f scanner-report.csv ]; then
+            echo "❌ scanner-report.csv not found"
+            exit 1
+          fi
+
+          echo "🔍 Evaluating scanner-report.csv"
+
+          apex=$(awk -F',' '
+            NR>1 {
+              sev=$2; file=$3
+              gsub(/"/,"",sev); gsub(/"/,"",file)
+              if (sev == 1 || sev ==2 && file ~ /\.cls$/) c++
+            }
+            END { print c+0 }
+          ' scanner-report.csv)
+
+          lwc=$(awk -F',' '
+            NR>1 {
+              sev=$2; file=$3
+              gsub(/"/,"",sev); gsub(/"/,"",file)
+              if (sev >= 2 && file ~ /\.(js|html|lwc)$/) c++
+            }
+            END { print c+0 }
+          ' scanner-report.csv)
+
+          echo "Apex Severity 3 Issues : $apex"
+          echo "LWC Severity 2+ Issues : $lwc"
+
+          if [ "$apex" -gt 0 ] || [ "$lwc" -gt 0 ]; then
+            echo "🚫 HARD GATE FAILED – BLOCKING PR"
+            exit 1
+          fi
+
+          echo "✅ HARD GATE PASSED – PR CAN MERGE"
