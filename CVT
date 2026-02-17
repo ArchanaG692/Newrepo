@@ -1,16 +1,18 @@
-trigger ContentVersionTrigger1 on ContentVersion (after insert) {
-    List<ContentVersion> newFiles = new List<ContentVersion>();
-    //  Iterate over newly inserted files
-    for (ContentVersion file : Trigger.new) {
-        if (file.Title != null && file.Title.startsWith('Code Scanner')) {
-            newFiles.add(file);
+trigger ContentDocumentLinkTrigger on ContentDocumentLink (after insert) {
+
+    // Collect all uploaded file document Ids
+    Set<Id> docIds = new Set<Id>();
+
+    for (ContentDocumentLink cdl : Trigger.new) {
+        if (cdl.ContentDocumentId != null) {
+            docIds.add(cdl.ContentDocumentId);
         }
     }
-    //  Process only if valid files are detected
-    if (!newFiles.isEmpty()) {
-        // **Pass `newFiles` instead of `contentDocumentIds`**
-        File.processNewFiles(newFiles);
-    } else {
-        System.debug(' No matching Code Scanner files detected.');
+
+    // Call main file processor (this already creates:
+    // 1️⃣ Scanner_Report_Case__c records
+    // 2️⃣ Vulnerability__c records from CSV
+    if (!docIds.isEmpty()) {
+        File.processNewContentDocuments(docIds);
     }
 }
