@@ -1,166 +1,107 @@
-@IsTest
-private class PullRequestCaseLinkerTest {
+@SuppressWarnings('PMD.ApexCRUDViolation')
+public with sharing class PullRequestCaseLinker {
 
-    // ---------- Helpers ----------
-    private static Pull_Request__c makePR(String fileName) {
-        Pull_Request__c pr = new Pull_Request__c();
-        pr.Check1_Report_File__c = fileName;
-        return pr;
-    }
+    // ✅ Use only the field you currently have
+    private static final String PR_FILE_FIELD = 'Check1_Report_File__c';
 
-    private static Case makeCase(String fileName, Id prId) {
-        Case c = new Case();
-        c.Status  = 'New';
-        c.Origin  = 'Phone';
-        c.Subject = 'PR Linking Test';
-        c.File_Name__c = fileName;
-        c.Pull_Request__c = prId; // null or PR Id
-        return c;
-    }
+    public static void handleAfter(
+        List<Pull_Request__c> newList,
+        Map<Id, Pull_Request__c> oldMap,
+        Boolean isInsert,
+        Boolean isUpdate
+    ) {
+        System.debug('=== PullRequestCaseLinker.handleAfter START ===');
+        System.debug('isInsert=' + isInsert + ', isUpdate=' + isUpdate + ', prCount=' + (newList == null ? 0 : newList.size()));
 
-    @IsTest
-    static void test_safeExit_nullList() {
-        Test.startTest();
-        PullRequestCaseLinker.handleAfter(null, null, true, false);
-        Test.stopTest();
-        System.assert(true, 'Should safely exit for null list.');
-    }
+        if (newList == null || newList.isEmpty()) {
+            System.debug('No PR records. Exiting.');
+            return;
+        }
 
-    @IsTest
-    static void test_safeExit_emptyList() {
-        Test.startTest();
-        PullRequestCaseLinker.handleAfter(new List<Pull_Request__c>(), null, true, false);
-        Test.stopTest();
-        System.assert(true, 'Should safely exit for empty list.');
-    }
+        // 1) Collect file names and map normalizedFile -> PR Id
+        Set<String> fileNamesForQuery = new Set<String>();
+        Map<String, Id> normalizedFileToPrId = new Map<String, Id>();
 
-    @IsTest
-    static void test_blankFileName_skipsPR_noCaseUpdate() {
-        Case c = makeCase('Report.csv', null);
-        insert c;
+        for (Pull_Request__c pr : newList) {
+            if (pr == null) continue;
 
-        Pull_Request__c pr = makePR('   ');
-        insert pr;
+            String rawFile = (String) pr.get(PR_FILE_FIELD);
+            System.debug('PR Id=' + pr.Id + ' raw file=' + rawFile);
 
-        Test.startTest();
-        PullRequestCaseLinker.handleAfter(new List<Pull_Request__c>{ pr }, null, true, false);
-        Test.stopTest();
+            String normalized = normalize(rawFile);
+            if (String.isBlank(normalized)) {
+                System.debug('PR Id=' + pr.Id + ' has blank file. Skipping.');
+                continue;
+            }
 
-        Case after = [SELECT Id, Pull_Request__c FROM Case WHERE Id = :c.Id];
-        System.assertEquals(null, after.Pull_Request__c, 'Case should remain unlinked when PR file is blank.');
-    }
+            // Query Cases using ORIGINAL trimmed value (case-sensitive IN for Text in many orgs)
+            String trimmedOriginal = rawFile.trim();
+            fileNamesForQuery.add(trimmedOriginal);
 
-    @IsTest
-    static void test_noMatchingCase_noUpdates() {
-        Case c = makeCase('A.csv', null);
-        insert c;
+            // If multiple PRs share the same file in the same transaction, first one wins (safer)
+            if (!normalizedFileToPrId.containsKey(normalized)) {
+                normalizedFileToPrId.put(normalized, pr.Id);
+            }
+        }
 
-        Pull_Request__c pr = makePR('B.csv');
-        insert pr;
+        System.debug('Collected fileNamesForQuery=' + fileNamesForQuery);
 
-        Test.startTest();
-        PullRequestCaseLinker.handleAfter(new List<Pull_Request__c>{ pr }, null, true, false);
-        Test.stopTest();
+        if (fileNamesForQuery.isEmpty()) {
+            System.debug('No file names found. Exiting.');
+            return;
+        }
 
-        Case after = [SELECT Id, Pull_Request__c FROM Case WHERE Id = :c.Id];
-        System.assertEquals(null, after.Pull_Request__c, 'No match: Case should remain unlinked.');
-    }
-
-    @IsTest
-    static void test_linksAllMatchingCases_oneOrMore() {
-        // Two cases with same file name -> both must link to PR
-        Case c1 = makeCase('Report.csv', null);
-        Case c2 = makeCase('Report.csv', null);
-        insert new List<Case>{ c1, c2 };
-
-        Pull_Request__c pr = makePR('Report.csv');
-        insert pr;
-
-        Test.startTest();
-        PullRequestCaseLinker.handleAfter(new List<Pull_Request__c>{ pr }, null, true, false);
-        Test.stopTest();
-
-        List<Case> afterCases = [
-            SELECT Id, Pull_Request__c
+        // 2) Query Cases that match
+        List<Case> matchingCases = [
+            SELECT Id, File_Name__c, Pull_Request__c
             FROM Case
-            WHERE Id IN :new List<Id>{ c1.Id, c2.Id }
+            WHERE File_Name__c IN :fileNamesForQuery
         ];
 
-        for (Case c : afterCases) {
-            System.assertEquals(pr.Id, c.Pull_Request__c, 'All matching Cases must be linked to PR.');
+        System.debug('matchingCases size=' + matchingCases.size());
+
+        if (matchingCases.isEmpty()) {
+            System.debug('No cases found with File_Name__c IN collected file names. Exiting.');
+            return;
         }
+
+        // 3) Update Cases to link PR
+        List<Case> casesToUpdate = new List<Case>();
+
+        for (Case c : matchingCases) {
+            String caseFileNorm = normalize(c.File_Name__c);
+            Id prId = normalizedFileToPrId.get(caseFileNorm);
+
+            System.debug('Case Id=' + c.Id + ' caseFile=' + c.File_Name__c + ' norm=' + caseFileNorm + ' matchedPrId=' + prId);
+
+            // ✅ FIX: link if not already linked to same PR
+            if (prId != null && c.Pull_Request__c != prId) {
+                c.Pull_Request__c = prId;
+                casesToUpdate.add(c);
+            }
+        }
+
+        System.debug('casesToUpdate size=' + casesToUpdate.size());
+
+        if (!casesToUpdate.isEmpty()) {
+            try {
+                update casesToUpdate;
+                System.debug('✅ Cases updated successfully.');
+            } catch (DmlException dmle) {
+                System.debug('❌ Failed to update Cases: ' + dmle.getMessage());
+                for (Integer i = 0; i < dmle.getNumDml(); i++) {
+                    System.debug('Row ' + i + ' error: ' + dmle.getDmlMessage(i));
+                }
+                throw dmle;
+            }
+        } else {
+            System.debug('No Case needed update (already linked or no match).');
+        }
+
+        System.debug('=== PullRequestCaseLinker.handleAfter END ===');
     }
 
-    @IsTest
-    static void test_caseInsensitiveAndTrim_matchingStillWorks() {
-        // Query uses trimmedOriginal; Case must match that trimmedOriginal
-        Pull_Request__c pr = makePR('   REPORT.CSV   ');
-        insert pr;
-
-        // Case file must exactly equal "REPORT.CSV" (trimmedOriginal) to match SOQL IN
-        Case c = makeCase('REPORT.CSV', null);
-        insert c;
-
-        Test.startTest();
-        PullRequestCaseLinker.handleAfter(new List<Pull_Request__c>{ pr }, null, true, false);
-        Test.stopTest();
-
-        Case after = [SELECT Id, Pull_Request__c FROM Case WHERE Id = :c.Id];
-        System.assertEquals(pr.Id, after.Pull_Request__c, 'Case should link even if PR has extra spaces/case.');
-    }
-
-    @IsTest
-    static void test_alreadyLinked_noDmlNeeded_noChange() {
-        Pull_Request__c pr = makePR('Same.csv');
-        insert pr;
-
-        Case c = makeCase('Same.csv', pr.Id); // already linked
-        insert c;
-
-        Test.startTest();
-        PullRequestCaseLinker.handleAfter(new List<Pull_Request__c>{ pr }, null, true, false);
-        Test.stopTest();
-
-        Case after = [SELECT Id, Pull_Request__c FROM Case WHERE Id = :c.Id];
-        System.assertEquals(pr.Id, after.Pull_Request__c, 'Already linked Case should remain linked.');
-    }
-
-    @IsTest
-    static void test_multiplePRs_firstWinsWhenSameFile() {
-        // Two PRs with same file in same transaction: first wins (per class logic)
-        Pull_Request__c pr1 = makePR('Dup.csv');
-        Pull_Request__c pr2 = makePR('Dup.csv');
-        insert new List<Pull_Request__c>{ pr1, pr2 };
-
-        Case c = makeCase('Dup.csv', null);
-        insert c;
-
-        Test.startTest();
-        PullRequestCaseLinker.handleAfter(new List<Pull_Request__c>{ pr1, pr2 }, null, true, false);
-        Test.stopTest();
-
-        Case after = [SELECT Id, Pull_Request__c FROM Case WHERE Id = :c.Id];
-        System.assertEquals(pr1.Id, after.Pull_Request__c, 'When duplicate file names exist, first PR should win.');
-    }
-
-    @IsTest
-    static void test_updatePath_flagsDontMatter_logicStillLinks() {
-        // Ensure behavior works even when called from after update
-        Case c = makeCase('U.csv', null);
-        insert c;
-
-        Pull_Request__c pr = makePR('U.csv');
-        insert pr;
-
-        Map<Id, Pull_Request__c> oldMap = new Map<Id, Pull_Request__c>{
-            pr.Id => new Pull_Request__c(Id = pr.Id, Check1_Report_File__c = 'Old.csv')
-        };
-
-        Test.startTest();
-        PullRequestCaseLinker.handleAfter(new List<Pull_Request__c>{ pr }, oldMap, false, true);
-        Test.stopTest();
-
-        Case after = [SELECT Id, Pull_Request__c FROM Case WHERE Id = :c.Id];
-        System.assertEquals(pr.Id, after.Pull_Request__c, 'Update path should link matching Case as well.');
+    private static String normalize(String s) {
+        return String.isBlank(s) ? '' : s.trim().toLowerCase();
     }
 }
