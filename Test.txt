@@ -1,21 +1,18 @@
-#!/bin/bash
+trigger ContentDocumentLinkTrigger on ContentDocumentLink (after insert) {
 
-echo "ClassName,MethodName,Time,Status"
+    // Collect all uploaded file document Ids
+    Set<Id> docIds = new Set<Id>();
 
-awk '
-  /<testcase/ {
-    gsub(/.*classname="/, "", $0);
-    class=substr($0, 1, index($0, "\"")-1);
-    gsub(/.*name="/, "", $0);
-    name=substr($0, 1, index($0, "\"")-1);
-    gsub(/.*time="/, "", $0);
-    time=substr($0, 1, index($0, "\"")-1);
-    status="Pass";
-  }
-  /<failure/ {
-    status="Fail";
-  }
-  /<\/testcase>/ {
-    print class "," name "," time "," status;
-  }
-' "$1"
+    for (ContentDocumentLink cdl : Trigger.new) {
+        if (cdl.ContentDocumentId != null) {
+            docIds.add(cdl.ContentDocumentId);
+        }
+    }
+
+    // Call main file processor (this already creates:
+    // 1️⃣ Scanner_Report_Case__c records
+    // 2️⃣ Vulnerability__c records from CSV
+    if (!docIds.isEmpty()) {
+        File.processNewContentDocuments(docIds);
+    }
+}
