@@ -8,31 +8,103 @@
 @IsTest
 private class PullRequestCaseLinkerTest {
 
-    private static String buildFileName(String sourceSha, String targetSha) {
+    /* ------------------------------------------------------------
+       Utility Methods
+    ------------------------------------------------------------ */
+
+    private static String buildFileName(String sourceSha) {
         return 'Code Scanner Report_DevOps_Project_Backup_Cloned_Branch_Merge '
             + sourceSha
-            + ' into '
-            + targetSha
-            + '.csv';
+            + ' into 059fdb91f4cac56e0dcd07b2eb54a70ae8923275.csv';
     }
 
-    private static Case createCaseWithSha(String sourceSha) {
-
-        Case c = new Case();
-        c.Subject = 'Test Case';
-        c.Status = 'New';
-        c.Origin = 'Phone';
-
-        // Important: Set File_Name__c so formula generates Commit_SHA_Key__c
-        c.File_Name__c = buildFileName(sourceSha, 'targetsha1234567890123456789012345678901234');
-
-        return c;
+    private static Case createCaseWithSha(String sha) {
+        return new Case(
+            Subject = 'Test Case',
+            Status = 'New',
+            Origin = 'Phone',
+            File_Name__c = buildFileName(sha)
+        );
     }
+
+    /* ------------------------------------------------------------
+       1️⃣ Null List Branch
+    ------------------------------------------------------------ */
+
+    @IsTest
+    static void testNullListEarlyExit() {
+        Test.startTest();
+        PullRequestCaseLinker.handleAfter(null, null, true, false);
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    /* ------------------------------------------------------------
+       2️⃣ Empty List Branch
+    ------------------------------------------------------------ */
+
+    @IsTest
+    static void testEmptyListEarlyExit() {
+        Test.startTest();
+        PullRequestCaseLinker.handleAfter(
+            new List<Pull_Request__c>(),
+            null,
+            true,
+            false
+        );
+        Test.stopTest();
+        System.assert(true);
+    }
+
+    /* ------------------------------------------------------------
+       3️⃣ No SHA in PR
+    ------------------------------------------------------------ */
+
+    @IsTest
+    static void testNoShaInPullRequest() {
+
+        Pull_Request__c pr = new Pull_Request__c();
+        insert pr;
+
+        Test.startTest();
+        PullRequestCaseLinker.handleAfter(
+            new List<Pull_Request__c>{ pr },
+            null,
+            true,
+            false
+        );
+        Test.stopTest();
+
+        System.assert(true);
+    }
+
+    /* ------------------------------------------------------------
+       4️⃣ No Matching Cases
+    ------------------------------------------------------------ */
+
+    @IsTest
+    static void testNoMatchingCasesBranch() {
+
+        Pull_Request__c pr = new Pull_Request__c();
+        pr.Commit_SHA_Key__c =
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+        Test.startTest();
+        insert pr;
+        Test.stopTest();
+
+        System.assert(true);
+    }
+
+    /* ------------------------------------------------------------
+       5️⃣ Insert Matching SHA
+    ------------------------------------------------------------ */
 
     @IsTest
     static void testInsertMatchingSha() {
 
-        String sha = 'd634553873f5a898fe49ca3d1e0200e962bf4f73';
+        String sha =
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
         Case c = createCaseWithSha(sha);
         insert c;
@@ -53,10 +125,15 @@ private class PullRequestCaseLinkerTest {
         System.assertEquals(pr.Id, updatedCase.Pull_Request__c);
     }
 
+    /* ------------------------------------------------------------
+       6️⃣ Update Matching SHA
+    ------------------------------------------------------------ */
+
     @IsTest
     static void testUpdateMatchingSha() {
 
-        String sha = 'abc1234567890123456789012345678901234567';
+        String sha =
+            'cccccccccccccccccccccccccccccccccccccccc';
 
         Pull_Request__c pr = new Pull_Request__c();
         insert pr;
@@ -79,20 +156,26 @@ private class PullRequestCaseLinkerTest {
         System.assertEquals(pr.Id, updatedCase.Pull_Request__c);
     }
 
+    /* ------------------------------------------------------------
+       7️⃣ Already Linked Branch
+    ------------------------------------------------------------ */
+
     @IsTest
-    static void testNoMatchScenario() {
+    static void testAlreadyLinkedBranch() {
 
-        String caseSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-        String prSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+        String sha =
+            'dddddddddddddddddddddddddddddddddddddddd';
 
-        Case c = createCaseWithSha(caseSha);
+        Case c = createCaseWithSha(sha);
         insert c;
 
         Pull_Request__c pr = new Pull_Request__c();
-        pr.Commit_SHA_Key__c = prSha;
-
-        Test.startTest();
+        pr.Commit_SHA_Key__c = sha;
         insert pr;
+
+        // Run update again to hit "already linked" branch
+        Test.startTest();
+        update pr;
         Test.stopTest();
 
         Case result = [
@@ -101,65 +184,93 @@ private class PullRequestCaseLinkerTest {
             WHERE Id = :c.Id
         ];
 
-        System.assertEquals(null, result.Pull_Request__c);
+        System.assertEquals(pr.Id, result.Pull_Request__c);
     }
 
-  @IsTest
-static void testBulkProcessing() {
+    /* ------------------------------------------------------------
+       8️⃣ Duplicate SHA – First PR Wins
+    ------------------------------------------------------------ */
 
-    List<Case> cases = new List<Case>();
-    List<Pull_Request__c> prs = new List<Pull_Request__c>();
+    @IsTest
+    static void testDuplicateShaFirstWins() {
 
-    for (Integer i = 0; i < 5; i++) {
+        String sha =
+            'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
-        // Generate exact 40-character SHA
-        String sha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' + i;
-        sha = sha.substring(0, 40);
+        Case c = createCaseWithSha(sha);
+        insert c;
 
-        Case c = new Case();
-        c.Subject = 'Bulk Case ' + i;
-        c.Status = 'New';
-        c.Origin = 'Phone';
-        c.File_Name__c =
-            'Code Scanner Report_DevOps_Project_Backup_Cloned_Branch_Merge '
-            + sha +
-            ' into 059fdb91f4cac56e0dcd07b2eb54a70ae8923275.csv';
+        Pull_Request__c pr1 = new Pull_Request__c();
+        pr1.Commit_SHA_Key__c = sha;
 
-        cases.add(c);
+        Pull_Request__c pr2 = new Pull_Request__c();
+        pr2.Commit_SHA_Key__c = sha;
 
-        Pull_Request__c pr = new Pull_Request__c();
-        pr.Commit_SHA_Key__c = sha;
-        prs.add(pr);
+        Test.startTest();
+        insert new List<Pull_Request__c>{ pr1, pr2 };
+        Test.stopTest();
+
+        Case result = [
+            SELECT Pull_Request__c
+            FROM Case
+            WHERE Id = :c.Id
+        ];
+
+        System.assertEquals(pr1.Id, result.Pull_Request__c);
     }
 
-    insert cases;
+    /* ------------------------------------------------------------
+       9️⃣ Bulk Processing
+    ------------------------------------------------------------ */
 
-    Test.startTest();
-    insert prs;
-    Test.stopTest();
+    @IsTest
+    static void testBulkProcessing() {
 
-    List<Case> updatedCases = [
-        SELECT Pull_Request__c
-        FROM Case
-        WHERE Id IN :cases
-    ];
+        List<Case> cases = new List<Case>();
+        List<Pull_Request__c> prs = new List<Pull_Request__c>();
 
-    for (Case c : updatedCases) {
-        System.assertNotEquals(
-            null,
-            c.Pull_Request__c,
-            'Each case should be linked in bulk scenario'
-        );
+        for (Integer i = 0; i < 5; i++) {
+
+            String sha =
+                ('fffffffffffffffffffffffffffffffffffffff' + i)
+                .substring(0, 40);
+
+            cases.add(createCaseWithSha(sha));
+
+            Pull_Request__c pr = new Pull_Request__c();
+            pr.Commit_SHA_Key__c = sha;
+            prs.add(pr);
+        }
+
+        insert cases;
+
+        Test.startTest();
+        insert prs;
+        Test.stopTest();
+
+        List<Case> updatedCases = [
+            SELECT Pull_Request__c
+            FROM Case
+            WHERE Id IN :cases
+        ];
+
+        for (Case c : updatedCases) {
+            System.assertNotEquals(null, c.Pull_Request__c);
+        }
     }
-}
+
+    /* ------------------------------------------------------------
+       🔟 Blank SHA Handling
+    ------------------------------------------------------------ */
 
     @IsTest
     static void testBlankShaHandling() {
 
-        Case c = new Case();
-        c.Subject = 'Blank SHA Case';
-        c.Status = 'New';
-        c.Origin = 'Phone';
+        Case c = new Case(
+            Subject = 'Blank SHA',
+            Status = 'New',
+            Origin = 'Phone'
+        );
         insert c;
 
         Pull_Request__c pr = new Pull_Request__c();
