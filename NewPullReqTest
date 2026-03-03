@@ -1,0 +1,179 @@
+/**
+ * @description       : 
+ * @author            : ChangeMeIn@UserSettingsUnder.SFDoc
+ * @group             : 
+ * @last modified on  : 03-03-2026
+ * @last modified by  : ChangeMeIn@UserSettingsUnder.SFDoc
+**/
+@IsTest
+private class PullRequestCaseLinkerTest {
+
+    private static String buildFileName(String sourceSha, String targetSha) {
+        return 'Code Scanner Report_DevOps_Project_Backup_Cloned_Branch_Merge '
+            + sourceSha
+            + ' into '
+            + targetSha
+            + '.csv';
+    }
+
+    private static Case createCaseWithSha(String sourceSha) {
+
+        Case c = new Case();
+        c.Subject = 'Test Case';
+        c.Status = 'New';
+        c.Origin = 'Phone';
+
+        // Important: Set File_Name__c so formula generates Commit_SHA_Key__c
+        c.File_Name__c = buildFileName(sourceSha, 'targetsha1234567890123456789012345678901234');
+
+        return c;
+    }
+
+    @IsTest
+    static void testInsertMatchingSha() {
+
+        String sha = 'd634553873f5a898fe49ca3d1e0200e962bf4f73';
+
+        Case c = createCaseWithSha(sha);
+        insert c;
+
+        Pull_Request__c pr = new Pull_Request__c();
+        pr.Commit_SHA_Key__c = sha;
+
+        Test.startTest();
+        insert pr;
+        Test.stopTest();
+
+        Case updatedCase = [
+            SELECT Pull_Request__c
+            FROM Case
+            WHERE Id = :c.Id
+        ];
+
+        System.assertEquals(pr.Id, updatedCase.Pull_Request__c);
+    }
+
+    @IsTest
+    static void testUpdateMatchingSha() {
+
+        String sha = 'abc1234567890123456789012345678901234567';
+
+        Pull_Request__c pr = new Pull_Request__c();
+        insert pr;
+
+        Case c = createCaseWithSha(sha);
+        insert c;
+
+        pr.Commit_SHA_Key__c = sha;
+
+        Test.startTest();
+        update pr;
+        Test.stopTest();
+
+        Case updatedCase = [
+            SELECT Pull_Request__c
+            FROM Case
+            WHERE Id = :c.Id
+        ];
+
+        System.assertEquals(pr.Id, updatedCase.Pull_Request__c);
+    }
+
+    @IsTest
+    static void testNoMatchScenario() {
+
+        String caseSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        String prSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+        Case c = createCaseWithSha(caseSha);
+        insert c;
+
+        Pull_Request__c pr = new Pull_Request__c();
+        pr.Commit_SHA_Key__c = prSha;
+
+        Test.startTest();
+        insert pr;
+        Test.stopTest();
+
+        Case result = [
+            SELECT Pull_Request__c
+            FROM Case
+            WHERE Id = :c.Id
+        ];
+
+        System.assertEquals(null, result.Pull_Request__c);
+    }
+
+  @IsTest
+static void testBulkProcessing() {
+
+    List<Case> cases = new List<Case>();
+    List<Pull_Request__c> prs = new List<Pull_Request__c>();
+
+    for (Integer i = 0; i < 5; i++) {
+
+        // Generate exact 40-character SHA
+        String sha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' + i;
+        sha = sha.substring(0, 40);
+
+        Case c = new Case();
+        c.Subject = 'Bulk Case ' + i;
+        c.Status = 'New';
+        c.Origin = 'Phone';
+        c.File_Name__c =
+            'Code Scanner Report_DevOps_Project_Backup_Cloned_Branch_Merge '
+            + sha +
+            ' into 059fdb91f4cac56e0dcd07b2eb54a70ae8923275.csv';
+
+        cases.add(c);
+
+        Pull_Request__c pr = new Pull_Request__c();
+        pr.Commit_SHA_Key__c = sha;
+        prs.add(pr);
+    }
+
+    insert cases;
+
+    Test.startTest();
+    insert prs;
+    Test.stopTest();
+
+    List<Case> updatedCases = [
+        SELECT Pull_Request__c
+        FROM Case
+        WHERE Id IN :cases
+    ];
+
+    for (Case c : updatedCases) {
+        System.assertNotEquals(
+            null,
+            c.Pull_Request__c,
+            'Each case should be linked in bulk scenario'
+        );
+    }
+}
+
+    @IsTest
+    static void testBlankShaHandling() {
+
+        Case c = new Case();
+        c.Subject = 'Blank SHA Case';
+        c.Status = 'New';
+        c.Origin = 'Phone';
+        insert c;
+
+        Pull_Request__c pr = new Pull_Request__c();
+
+        Test.startTest();
+        insert pr;
+        Test.stopTest();
+
+        Case result = [
+            SELECT Pull_Request__c
+            FROM Case
+            WHERE Id = :c.Id
+        ];
+
+        System.assertEquals(null, result.Pull_Request__c);
+    }
+}
