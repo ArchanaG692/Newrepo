@@ -1,0 +1,5 @@
+IF(
+FIND(" into ", File_Name__c) > 40,
+MID(File_Name__c, FIND(" into ", File_Name__c) - 40, 40),
+""
+)
