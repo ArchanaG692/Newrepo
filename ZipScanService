@@ -1,0 +1,212 @@
+public without sharing class ZipScanService {
+
+    private static final String OWNER = 'Bhavana02012003';
+    private static final String REPO  = 'code-scan';
+    private static final String REPORT_BRANCH = 'scanner_reports';
+
+    public class StartResponse {
+        @AuraEnabled public String scanId;
+        @AuraEnabled public String reportPath;
+        @AuraEnabled public String reportBranch;
+        @AuraEnabled public String message;
+    }
+
+    @AuraEnabled
+    public static StartResponse startZipScan(Id contentDocumentId) {
+
+        System.debug('===== START ZIP SCAN =====');
+        System.debug('ContentDocumentId: ' + contentDocumentId);
+
+        if (contentDocumentId == null) {
+            throw new AuraHandledException('Upload ZIP first');
+        }
+
+        ContentVersion cv = [
+            SELECT Id, Title
+            FROM ContentVersion
+            WHERE ContentDocumentId = :contentDocumentId
+            ORDER BY CreatedDate DESC
+            LIMIT 1
+        ];
+
+        System.debug('ContentVersion Found: ' + cv);
+
+        ContentDistribution cd = new ContentDistribution();
+        cd.Name = 'ZipScan-' + cv.Title;
+        cd.ContentVersionId = cv.Id;
+        cd.PreferencesAllowViewInBrowser = true;
+        cd.PreferencesAllowOriginalDownload = true;
+        cd.PreferencesLinkLatestVersion = true;
+
+        insert cd;
+
+        System.debug('ContentDistribution inserted: ' + cd.Id);
+
+        cd = [
+            SELECT DistributionPublicUrl, ContentDownloadUrl
+            FROM ContentDistribution
+            WHERE Id = :cd.Id
+            LIMIT 1
+        ];
+
+        System.debug('Viewer URL: ' + cd.DistributionPublicUrl);
+        System.debug('Download URL: ' + cd.ContentDownloadUrl);
+
+        if(String.isBlank(cd.DistributionPublicUrl)){
+            throw new AuraHandledException('Public link not generated.');
+        }
+
+        String scanId = String.valueOf(Datetime.now().getTime());
+        String reportPath = 'reports/scan_' + scanId + '.csv';
+
+        System.debug('ScanId: ' + scanId);
+        System.debug('ReportPath: ' + reportPath);
+
+        triggerRepositoryDispatchAsync(cd.ContentDownloadUrl, reportPath);
+
+        StartResponse res = new StartResponse();
+        res.scanId = scanId;
+        res.reportPath = reportPath;
+        res.reportBranch = REPORT_BRANCH;
+        res.message = 'Workflow triggered successfully';
+
+        System.debug('Returning response: ' + res);
+
+        return res;
+    }
+
+
+    @future(callout=true)
+    public static void triggerRepositoryDispatchAsync(String zipUrl, String reportPath){
+
+        System.debug('===== TRIGGER GITHUB WORKFLOW =====');
+        System.debug('ZIP URL: ' + zipUrl);
+        System.debug('Report Path: ' + reportPath);
+
+        HttpRequest req = new HttpRequest();
+
+        req.setEndpoint(
+            'callout:GitHub_Dispatch/repos/' + OWNER + '/' + REPO + '/dispatches'
+        );
+
+        req.setMethod('POST');
+
+        req.setHeader('Accept','application/vnd.github+json');
+        req.setHeader('Content-Type','application/json');
+
+        Map<String,Object> body = new Map<String,Object>{
+            'event_type' => 'zip_scan',
+            'client_payload' => new Map<String,Object>{
+                'zip_url' => zipUrl,
+                'report_path' => reportPath,
+                'report_branch' => REPORT_BRANCH
+            }
+        };
+
+        String bodyJson = JSON.serialize(body);
+
+        System.debug('GitHub Request Body: ' + bodyJson);
+
+        req.setBody(bodyJson);
+
+        Http http = new Http();
+        HttpResponse res;
+
+        try {
+
+            res = http.send(req);
+
+            System.debug('GitHub Status Code: ' + res.getStatusCode());
+            System.debug('GitHub Response Body: ' + res.getBody());
+
+        } catch(Exception e) {
+
+            System.debug('GitHub Callout FAILED: ' + e.getMessage());
+
+        }
+    }
+
+
+    @AuraEnabled(cacheable=false)
+    public static String fetchReportCsv(String reportPath){
+
+        System.debug('===== FETCH REPORT FROM SALESFORCE FILES =====');
+
+        try{
+
+            ContentVersion cv = [
+                SELECT Id, VersionData
+                FROM ContentVersion
+                WHERE Title LIKE 'ZIP_Scan_Report%'
+                ORDER BY CreatedDate DESC
+                LIMIT 1
+            ];
+
+            if(cv == null){
+                System.debug('No report found yet.');
+                return null;
+            }
+
+            String csv = cv.VersionData.toString();
+
+            System.debug('CSV LENGTH: ' + csv.length());
+
+            return csv;
+
+        }catch(Exception e){
+
+            System.debug('ERROR FETCHING CSV: ' + e.getMessage());
+            return null;
+
+        }
+    }
+
+
+    @AuraEnabled
+    public static String saveReportCsvToFiles(String fileName, String csvText, Id parentRecordId) {
+
+        System.debug('===== SAVE REPORT CSV TO FILES =====');
+        System.debug('FileName: ' + fileName);
+        System.debug('ParentRecordId: ' + parentRecordId);
+
+        if (String.isBlank(csvText)) {
+            throw new AuraHandledException('CSV text is empty. Please run scan again.');
+        }
+
+        if (String.isBlank(fileName)) {
+            fileName = 'Scanner_Report.csv';
+        }
+
+        if (!fileName.toLowerCase().endsWith('.csv')) {
+            fileName += '.csv';
+        }
+
+        String title = fileName.replace('.csv', '');
+
+        ContentVersion cv = new ContentVersion();
+        cv.Title = title;
+        cv.PathOnClient = fileName;
+        cv.VersionData = Blob.valueOf(csvText);
+
+        insert cv;
+
+        ContentVersion insertedCv = [
+            SELECT Id, ContentDocumentId
+            FROM ContentVersion
+            WHERE Id = :cv.Id
+            LIMIT 1
+        ];
+
+        if (parentRecordId != null) {
+            ContentDocumentLink cdl = new ContentDocumentLink();
+            cdl.ContentDocumentId = insertedCv.ContentDocumentId;
+            cdl.LinkedEntityId = parentRecordId;
+            cdl.ShareType = 'V';
+            cdl.Visibility = 'AllUsers';
+            insert cdl;
+        }
+
+        System.debug('Saved CSV ContentVersionId: ' + insertedCv.Id);
+        return insertedCv.Id;
+    }
+}
