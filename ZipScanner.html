@@ -1,0 +1,199 @@
+<template>
+
+<div class="app-container">
+
+    <!-- Hero Header -->
+    <div class="hero">
+
+        <div class="hero-left">
+            <lightning-icon
+                icon-name="utility:shield"
+                size="large"
+                class="hero-icon">
+            </lightning-icon>
+
+            <div class="hero-text">
+                <div class="hero-title">
+                    CVS Health Security Scanner
+                </div>
+
+                <div class="hero-subtitle">
+                    Automated Salesforce Code Vulnerability Detection
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Upload Card -->
+    <div class="upload-card">
+
+        <div class="upload-title">
+            Upload Salesforce Project
+        </div>
+
+        <div class="upload-area">
+
+            <lightning-file-upload
+                label="Upload Salesforce Project ZIP"
+                accept={acceptedFormats}
+                record-id={recordId}
+                onuploadfinished={handleUploadFinished}>
+            </lightning-file-upload>
+
+        </div>
+
+        <div class="scan-button-wrapper">
+
+            <lightning-button
+                variant="brand"
+                label="Run Security Scan"
+                class="scan-btn"
+                onclick={runScan}
+                disabled={disableRun}>
+            </lightning-button>
+
+        </div>
+
+    </div>
+
+    <!-- Upload Success -->
+    <template if:true={fileUploaded}>
+
+        <div class="upload-success">
+
+            <lightning-icon
+                icon-name="utility:success"
+                size="medium"
+                class="success-icon">
+            </lightning-icon>
+
+            <div class="success-text">
+
+                <div class="success-title">
+                    File Uploaded Successfully
+                </div>
+
+                <div class="success-sub">
+                    <b>{uploadedFileName}</b> is ready for scanning
+                </div>
+
+            </div>
+
+        </div>
+
+    </template>
+
+    <!-- Status -->
+    <template if:true={working}>
+        <div class="status-card">
+
+            <lightning-spinner size="medium"></lightning-spinner>
+
+            <div class="status-text">
+                {statusText}
+            </div>
+
+        </div>
+    </template>
+
+    <!-- Error -->
+    <template if:true={error}>
+        <div class="error-box">
+            {error}
+        </div>
+    </template>
+
+    <!-- Results -->
+    <template if:true={hasRows}>
+
+        <!-- Summary Cards -->
+        <div class="summary-container">
+
+            <div class="summary-card critical">
+                <div class="summary-number">{criticalCount}</div>
+                <div class="summary-label">Critical</div>
+            </div>
+
+            <div class="summary-card high">
+                <div class="summary-number">{highCount}</div>
+                <div class="summary-label">High</div>
+            </div>
+
+            <div class="summary-card medium">
+                <div class="summary-number">{mediumCount}</div>
+                <div class="summary-label">Medium</div>
+            </div>
+
+            <div class="summary-card low">
+                <div class="summary-number">{lowCount}</div>
+                <div class="summary-label">Low</div>
+            </div>
+
+        </div>
+
+        <!-- Results Header -->
+        <div class="result-header">
+
+            <div class="result-title">
+                Scan Results ({rows.length})
+            </div>
+
+            <div class="header-actions">
+
+                <lightning-button
+                    label="Export CSV"
+                    icon-name="utility:download"
+                    onclick={downloadCsv}
+                    disabled={disableDownload}>
+                </lightning-button>
+
+                <lightning-combobox
+                    label="Rows"
+                    value={pageSize}
+                    options={pageSizeOptions}
+                    onchange={handlePageSizeChange}>
+                </lightning-combobox>
+
+            </div>
+
+        </div>
+
+        <!-- Table -->
+        <div class="table-container">
+
+            <lightning-datatable
+                key-field="id"
+                data={paginatedRows}
+                columns={columns}
+                hide-checkbox-column>
+            </lightning-datatable>
+
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination">
+
+            <lightning-button
+                label="Previous"
+                onclick={prevPage}
+                disabled={isFirstPage}>
+            </lightning-button>
+
+            <span class="page-info">
+                Page {pageNumber} of {totalPages}
+            </span>
+
+            <lightning-button
+                label="Next"
+                onclick={nextPage}
+                disabled={isLastPage}>
+            </lightning-button>
+
+        </div>
+
+    </template>
+
+</div>
+
+</template>
